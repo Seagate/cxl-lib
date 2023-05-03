@@ -1,4 +1,4 @@
-module github.com/seagate/cxl-lib
+module github.com/Seagate/cxl-lib
 
 go 1.20
 

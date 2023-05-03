@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/seagate/cxl-lib/pkg/cxl"
+	"github.com/Seagate/cxl-lib/pkg/cxl"
 
 	"k8s.io/klog/v2"
 )

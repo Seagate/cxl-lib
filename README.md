@@ -23,7 +23,7 @@ package main
 
 import (
     "fmt"
-    "github.com/seagate/cxl-lib/pkg/cxl"
+    "github.com/Seagate/cxl-lib/pkg/cxl"
 )
 
 func main() {
