@@ -158,7 +158,7 @@ func main() {
 
 	if settings.CEDT {
 		if cxl.ACPITables.CEDT == nil {
-			fmt.Printf("No CEDT table found on the system.\nn")
+			fmt.Printf("No CEDT table found on the system.\n")
 		} else {
 			fmt.Printf("\nCEDT table header:\n")
 			PrintTableToStdout(cxl.ACPITables.CEDT.Header, "   ", "   ")
