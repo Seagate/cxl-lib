@@ -12,9 +12,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/jaypipes/pcidb"
 	"k8s.io/klog/v2"
+
+	_ "embed"
 )
+
+//go:embed "pci.ids"
+var pci_ids string
 
 // Base address of PCI memory mapped configurations
 var PCI_MMCONFIG_BASE_ADDR int64
@@ -279,13 +283,20 @@ func (c *CxlDev) GetPcieHdr() *PCIE_CONFIG_HDR {
 
 // return the Vendor Info of the PCIe/CXL device
 func (c *CxlDev) GetVendorInfo() string {
-	//map of vendor
-	Pcidbs, err := pcidb.New()
-	if err != nil {
-		fmt.Printf("Error getting PCI info: %v", err)
-	}
 	pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
-	return Pcidbs.Vendors[fmt.Sprintf("%x", pcieHeader.Vendor_ID)].Name
+
+	fileScanner := bufio.NewScanner(strings.NewReader(pci_ids))
+	fileScanner.Split(bufio.ScanLines)
+	for fileScanner.Scan() {
+		text := fileScanner.Text()
+		if len(text) > 4 {
+			if text[:4] == fmt.Sprintf("%x", pcieHeader.Vendor_ID) {
+				return text[4:]
+			}
+		}
+	}
+
+	return "Unknown Vendor"
 }
 
 // return the Vendor Info of the PCIe/CXL device
