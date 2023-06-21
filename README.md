@@ -15,6 +15,7 @@ cxl-lib project repository is maintained at https://github.com/Seagate.
 
 ***cxl-lib*** follows CXL specification rev 1.1.  
 
+***pci.ids*** is the database for parsing pci vendor. User could obtain the latest version from http://pci-ids.ucw.cz/ or https://github.com/pciutils/pciids.git
 
 ## Usage
 

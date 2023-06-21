@@ -12,9 +12,15 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/jaypipes/pcidb"
 	"k8s.io/klog/v2"
+
+	_ "embed"
 )
+
+//go:embed "pci.ids"
+var pci_ids string
+
+var PciVendor map[string]string
 
 // Base address of PCI memory mapped configurations
 var PCI_MMCONFIG_BASE_ADDR int64
@@ -59,17 +65,34 @@ type CxlMemAttr struct {
 	WriteBandwidth uint16
 }
 
+func init() {
+	initVendorTable()
+	getPciMmConfig()
+	ACPITables.FetchCedt()
+}
+
+func initVendorTable() {
+	PciVendor = make(map[string]string)
+	fileScanner := bufio.NewScanner(strings.NewReader(pci_ids))
+	fileScanner.Split(bufio.ScanLines)
+	for fileScanner.Scan() {
+		id, vendor, cut := strings.Cut(fileScanner.Text(), "  ")
+		if cut {
+			if len(id) == 4 {
+				if !strings.HasPrefix(id, "\t") {
+					PciVendor[id] = vendor
+				}
+			}
+		}
+	}
+}
+
 type ACPI struct {
 	CEDT *cedt_table_struct
 }
 
 // ACPI tables are static, initialize via init() func
 var ACPITables = ACPI{}
-
-func init() {
-	getPciMmConfig()
-	ACPITables.FetchCedt()
-}
 
 // Update local copy of the cedt .
 func (a *ACPI) FetchCedt() {
@@ -279,13 +302,15 @@ func (c *CxlDev) GetPcieHdr() *PCIE_CONFIG_HDR {
 
 // return the Vendor Info of the PCIe/CXL device
 func (c *CxlDev) GetVendorInfo() string {
-	//map of vendor
-	Pcidbs, err := pcidb.New()
-	if err != nil {
-		fmt.Printf("Error getting PCI info: %v", err)
-	}
 	pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
-	return Pcidbs.Vendors[fmt.Sprintf("%x", pcieHeader.Vendor_ID)].Name
+	vendor, ok := PciVendor[fmt.Sprintf("%x", pcieHeader.Vendor_ID)]
+	if ok {
+		return vendor
+
+	} else {
+		return "Unkown Vendor"
+	}
+
 }
 
 // return the Vendor Info of the PCIe/CXL device
