@@ -150,6 +150,16 @@ func main() {
 				fmt.Printf("\nDVSEC %s [ID:%d] at offset 0x%x:\n", id.String(), id, dvsec_ofs)
 				PrintTableToStdout(dev.GetDvsec(id), "   ", "   ")
 			}
+
+			if dev.Memdev != nil {
+				fmt.Printf("\nCXL Device Capabilities Array Register:\n")
+				PrintTableToStdout(dev.Memdev.CXL_Device_Capabilities_Array_Register, "   ", "   ")
+				for i, cap := range dev.Memdev.CXL_Device_Capability_Header {
+					fmt.Printf("\nCXL Device Capability %d Header:\n", i)
+					PrintTableToStdout(cap, "   ", "   ")
+				}
+			}
+
 		} else {
 			fmt.Printf("No CXL dev on BDF %s \n", settings.PCIE)
 

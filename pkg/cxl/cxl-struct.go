@@ -486,12 +486,15 @@ type CXL_DEVICE_CAPABILITIES_HEADER struct {
 type CxlMemoryDeviceRegisters struct {
 	CXL_Device_Capabilities_Array_Register CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER
 	CXL_Device_Capability_Header           []CXL_DEVICE_CAPABILITIES_HEADER
+	CXL_Device_Capability                  []byte
 }
 
-func CXL_MEMORY_DEVICE_REGISTERS(Size uint) CxlMemoryDeviceRegisters {
+func CXL_MEMORY_DEVICE_REGISTERS(Size uint) CxlMemoryDeviceRegisters { // CXL Memory device register has fixed size of 4K
 	slice := make([]CXL_DEVICE_CAPABILITIES_HEADER, Size)
+	slice2 := make([]byte, 4096-16-16*Size)
 	return CxlMemoryDeviceRegisters{
 		CXL_Device_Capability_Header: slice,
+		CXL_Device_Capability:        slice2,
 	}
 }
 

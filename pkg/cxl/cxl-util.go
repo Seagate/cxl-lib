@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
 
 	"k8s.io/klog/v2"
 
@@ -144,11 +145,12 @@ func (a *ACPI) GetCedtSubtableSize(ofs int) int {
 }
 
 type CxlDev struct {
-	Bdf        *BDF       `json:"BDF"`
-	Vendor     string     `json:"Vendor"`
-	CXLrev     CxlRev     `json:"CXL-Rev"`
-	CXLdevtype CxlDevType `json:"CXL-Type"`
-	PCIE       []byte     `json:"-"`
+	Bdf        *BDF                      `json:"BDF"`
+	Vendor     string                    `json:"Vendor"`
+	CXLrev     CxlRev                    `json:"CXL-Rev"`
+	CXLdevtype CxlDevType                `json:"CXL-Type"`
+	PCIE       []byte                    `json:"-"`
+	Memdev     *CxlMemoryDeviceRegisters `json:"-"`
 }
 
 // initialize the structure based on BDF value
@@ -162,12 +164,30 @@ func (c *CxlDev) init(b *BDF) error {
 		c.Vendor = c.GetVendorInfo()
 		c.CXLrev = c.GetCxlRev()
 		c.CXLdevtype = c.GetCxlType()
+		if !c.isCxlRcd() {
+			// get info from register locator
+			pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
+			regLoc := c.GetDvsec(CXL_DVSEC_REGISTER_LOCATOR).(registerLocator)
+			for _, blk := range regLoc.Register_Block {
+				bir := blk.Register_Offset_Low.Register_BIR
+				baseAddr := int64(pcieHeader.Base_Address_Registers[bir].Base_Address<<4) | int64(blk.Register_Offset_Low.Register_Block_Offset_Low) | int64(blk.Register_Offset_High.Register_Block_Offset_High)<<32
+
+				// if blk.Register_Offset_Low.Register_Block_Identifier == 1 { //component registers
+				// }
+				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
+					reg := readMemory4k(baseAddr)
+					cxlMemDevCap := parseStruct(reg, CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER{})
+					parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
+					c.Memdev = &parsedCxlMemDevCap
+				}
+			}
+		}
 	}
 
 	return err
 }
 
-// check if a device is CXL device.
+// check if a device is CXL memory device.
 func (c *CxlDev) isCxlDev() bool {
 	pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
 	klog.V(3).InfoS("InfoS structured:   cxl-util: isCXLDev", "Vendor", hex(pcieHeader.Vendor_ID), "device", hex(pcieHeader.Device_ID), "class", hex(pcieHeader.Class_Code.Base_Class_Code), "sub", hex(pcieHeader.Class_Code.Sub_Class_Code), "prog-if", hex(pcieHeader.Class_Code.Prog_if))
@@ -177,6 +197,11 @@ func (c *CxlDev) isCxlDev() bool {
 		return true
 	}
 	return false
+}
+
+// check if a device is RCD ( CXL 1.1 device )
+func (c *CxlDev) isCxlRcd() bool {
+	return c.CXLrev == CXL_REV_1_1
 }
 
 // Update local copy of the pcie config .
@@ -402,9 +427,11 @@ func readMemory4k(baseAddress int64) []byte {
 
 	mmapCp := make([]byte, bufferSize)
 	// Save a copy of mmap, which will be elimicated after syscall.Munmap(mmap)
-	for i := 0; i < bufferSize; i++ {
-		mmapCp[i] = mmap[i]
+	for offset := 0; offset < bufferSize/4; offset++ {
+		// force 32bit read: some systems doesn't support 8bit read in pcie config space
+		*(*uint32)(unsafe.Pointer(&mmapCp[4*offset])) = *(*uint32)(unsafe.Pointer(&mmap[4*offset]))
 	}
+
 	err = syscall.Munmap(mmap)
 	if err != nil {
 		klog.Fatal(err)
