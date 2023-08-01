@@ -88,7 +88,7 @@ func initVendorTable() {
 }
 
 type ACPI struct {
-	CEDT *cedt_table_struct
+	CEDT []byte
 }
 
 // ACPI tables are static, initialize via init() func
@@ -99,27 +99,48 @@ func (a *ACPI) FetchCedt() {
 	b, err := readACPI("CEDT")
 	if err == nil {
 		acpiHdr := parseStruct(b, ACPI_HEADER{})
-		cedtFileS := parseStruct(b, CEDT_TABLE(uint(acpiHdr.getCedtSubtableCountFromAcpiHeader())))
-		a.CEDT = &cedtFileS
+		if string(acpiHdr.Signature[:]) == "CEDT" {
+			a.CEDT = b
+		}
 	} else {
 		klog.V(1).Info(err)
 	}
 }
 
-// Get cedt subtable counts.
-func (a *ACPI) GetCedtCount() int {
-	return len(a.CEDT.Subtable)
+// Get cedt header struct
+func (a *ACPI) GetCedtHeader() *ACPI_HEADER {
+	acpiHdr := parseStruct(a.CEDT, ACPI_HEADER{})
+	return &acpiHdr
 }
 
-// Get subtable cedt struct by index.
-func (a *ACPI) GetCedtSubtable(i int) *CEDT_SUBTABLE {
-	if a.CEDT == nil {
-		a.FetchCedt()
-	}
-	if len(a.CEDT.Subtable) > i {
-		return &a.CEDT.Subtable[i]
+// Get cedt header struct size in bytes
+func (a *ACPI) CedtHeaderSize() int {
+	return StructSize(ACPI_HEADER{})
+}
+
+// Get subtable cedt struct by offset.
+func (a *ACPI) GetCedtSubtable(ofs int) interface{} {
+	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE_STRUCT{})
+	switch cedt_struct_types(subT.Type) {
+	case ACPI_CEDT_CXL_HOST_BRIDGE_STRUCT:
+		return subT
+	case ACPI_CEDT_CXL_FIXED_MEMORY_WINDOW:
+		tempT := parseStruct(a.CEDT[ofs:], cedt_cxl_fixed_memory_window_struct{})
+		return parseStruct(a.CEDT[ofs:], CEDT_CXL_FIXED_MEMORY_WINDOW(uint(tempT.Record_Length)))
+	case ACPI_CEDT_CXL_XOR_INTERLEAVE_MATH:
+		tempT := parseStruct(a.CEDT[ofs:], cedt_cxl_xor_interleave_math_struct{})
+		return parseStruct(a.CEDT[ofs:], CEDT_CXL_XOR_INTERLEAVE_MATH(uint(tempT.Record_Length)))
+	case ACPI_CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT:
+		return parseStruct(a.CEDT[ofs:], CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT{})
 	}
 	return nil
+}
+
+// Get subtable cedt struct size in bytes.
+func (a *ACPI) GetCedtSubtableSize(ofs int) int {
+	// All sub tables shares the same header so we can use any table to get the size
+	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE_STRUCT{})
+	return int(subT.Record_Length)
 }
 
 type CxlDev struct {
@@ -166,11 +187,6 @@ func (c *CxlDev) updatePcieConfig() {
 // return the BDF as string BUS:DEV.FUN
 func (c *CxlDev) GetBdfString() string {
 	return fmt.Sprintf("%02X:%02X.%1X", c.Bdf.Bus, c.Bdf.Device, c.Bdf.Function)
-}
-
-// return the value of the CEDT field
-func (c *CxlDev) GetCedtField(field string) interface{} {
-	return nil
 }
 
 // return a list of DVSEC tables from the CXL device

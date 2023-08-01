@@ -161,12 +161,17 @@ func main() {
 			fmt.Printf("No CEDT table found on the system.\n")
 		} else {
 			fmt.Printf("\nCEDT table header:\n")
-			PrintTableToStdout(cxl.ACPITables.CEDT.Header, "   ", "   ")
+			cedtHdr := cxl.ACPITables.GetCedtHeader()
+			PrintTableToStdout(cedtHdr, "   ", "   ")
 
-			for i := 0; i < cxl.ACPITables.GetCedtCount(); i++ {
-				fmt.Printf("\nCEDT subtable [%d] :\n", i)
-				PrintTableToStdout(cxl.ACPITables.GetCedtSubtable(i), "   ", "   ")
+			// iterate sub tables
+			ofs := cxl.ACPITables.CedtHeaderSize()
+			for uint32(ofs) < cedtHdr.Table_Length {
+				subT := cxl.ACPITables.GetCedtSubtable(ofs)
+				PrintTableToStdout(subT, "   ", "   ")
+				ofs += cxl.ACPITables.GetCedtSubtableSize(ofs)
 			}
+
 		}
 
 	}

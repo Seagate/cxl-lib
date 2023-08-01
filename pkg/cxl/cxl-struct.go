@@ -19,35 +19,77 @@ type ACPI_HEADER struct {
 	Asl_Compiler_Revision uint32
 }
 
-func (a *ACPI_HEADER) getCedtSubtableCountFromAcpiHeader() int {
-	// ACPI_HEADER is at fixed size 36B
-	// Each CEDT_SUBTABLE is at fixed size 32B
-	return (int(a.Table_Length) - 36) / 32
+type CEDT_CXL_HOST_BRIDGE_STRUCT struct {
+	Type          byte
+	Reserved      byte
+	Record_Length uint16
+	UID           uint32
+	CXL_Version   uint32
+	Reserved2     uint32
+	Base          uint64
+	Length        uint64
 }
 
-// // CXL Early Discovery Table (CEDT)
-type CEDT_SUBTABLE struct {
-	Subtable_Type          byte
+type cedt_cxl_fixed_memory_window_struct struct {
+	Type                   byte
 	Reserved               byte
-	Length                 uint16
-	Associated_host_bridge uint32
-	Specification_version  uint32
+	Record_Length          uint16
 	Reserved2              uint32
-	Register_base          uint64
-	Register_length        uint64
+	Base_HPA               uint64
+	Window_Size            uint64
+	ENIW                   byte // Encoded Number of Interleave Ways
+	Interleave_Arithmetic  byte
+	Reserved3              uint16
+	HBIG                   uint32 // Host Bridge Interleave Granularity
+	Window_Restrictions    uint16
+	QTG_ID                 uint16
+	Interleave_Target_List []uint32
 }
 
-type cedt_table_struct struct {
-	Header   ACPI_HEADER
-	Subtable []CEDT_SUBTABLE
-}
-
-func CEDT_TABLE(size uint) cedt_table_struct {
-	slice := make([]CEDT_SUBTABLE, size)
-	return cedt_table_struct{
-		Subtable: slice,
+func CEDT_CXL_FIXED_MEMORY_WINDOW(Record_Length uint) cedt_cxl_fixed_memory_window_struct {
+	NIW := (Record_Length - 36) / 4
+	slice := make([]uint32, NIW)
+	return cedt_cxl_fixed_memory_window_struct{
+		Interleave_Target_List: slice,
 	}
 }
+
+type cedt_cxl_xor_interleave_math_struct struct {
+	Type          byte
+	Reserved      byte
+	Record_Length uint16
+	Reserved2     uint16
+	HBIG          byte // Host Bridge Interleave Granularity
+	NIB           byte // Number of Bitmap Entries
+	XORMAP_List   []uint64
+}
+
+func CEDT_CXL_XOR_INTERLEAVE_MATH(Record_Length uint) cedt_cxl_xor_interleave_math_struct {
+	NIB := (Record_Length - 8) / 8
+	slice := make([]uint64, NIB)
+	return cedt_cxl_xor_interleave_math_struct{
+		XORMAP_List: slice,
+	}
+}
+
+type CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT struct {
+	Type                byte
+	Reserved            byte
+	Record_Length       uint16
+	RCEC_Segment_Number uint16
+	RCEC_BDF            uint16
+	Protocol_Type       byte
+	Base_Address        uint64
+}
+
+type cedt_struct_types uint
+
+const (
+	ACPI_CEDT_CXL_HOST_BRIDGE_STRUCT                  cedt_struct_types = iota // 0
+	ACPI_CEDT_CXL_FIXED_MEMORY_WINDOW                                          // 1
+	ACPI_CEDT_CXL_XOR_INTERLEAVE_MATH                                          // 2
+	ACPI_CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT                          // 3
+)
 
 // define for PCIE config space struct
 type PCIE_CLASS_CODE struct {

@@ -51,6 +51,11 @@ type bitfield_31b uint32
 type bitfield_32b uint32
 type bitfield_64b uint64
 
+// StructSize returns the size of a structure in Bytes
+func StructSize(s any) int {
+	return dataSize(reflect.ValueOf(s))
+}
+
 // dataSize returns the number of bytes the actual data represented by v occupies in memory.
 // For compound structures, it sums the sizes of the elements. Thus, for instance, for a slice
 // it returns the length of the slice times the element size and does not count the memory
