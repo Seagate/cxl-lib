@@ -160,6 +160,23 @@ func main() {
 				}
 			}
 
+			if dev.CmpReg != nil {
+				fmt.Printf("\nCXL Component Register:\n")
+				if dev.CmpReg.Ras_Cap != nil {
+					fmt.Printf("\nRAS CAP:\n")
+					PrintTableToStdout(dev.CmpReg.Ras_Cap, "      ", "   ")
+				}
+				if dev.CmpReg.Link_Cap != nil {
+					fmt.Printf("\nLINK CAP:\n")
+					PrintTableToStdout(dev.CmpReg.Link_Cap, "      ", "   ")
+				}
+				if dev.CmpReg.HDM_Decoder_Cap != nil {
+					fmt.Printf("\nHDM DECODER CAP:\n")
+					PrintTableToStdout(dev.CmpReg.HDM_Decoder_Cap, "      ", "   ")
+				}
+
+			}
+
 		} else {
 			fmt.Printf("No CXL dev on BDF %s \n", settings.PCIE)
 

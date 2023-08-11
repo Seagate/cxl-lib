@@ -19,7 +19,7 @@ type ACPI_HEADER struct {
 	Asl_Compiler_Revision uint32
 }
 
-type CEDT_CXL_HOST_BRIDGE_STRUCT struct {
+type CEDT_CXL_HOST_BRIDGE struct {
 	Type          byte
 	Reserved      byte
 	Record_Length uint16
@@ -85,7 +85,7 @@ type CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT struct {
 type cedt_struct_types uint
 
 const (
-	ACPI_CEDT_CXL_HOST_BRIDGE_STRUCT                  cedt_struct_types = iota // 0
+	ACPI_CEDT_CXL_HOST_BRIDGE                         cedt_struct_types = iota // 0
 	ACPI_CEDT_CXL_FIXED_MEMORY_WINDOW                                          // 1
 	ACPI_CEDT_CXL_XOR_INTERLEAVE_MATH                                          // 2
 	ACPI_CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT                          // 3
@@ -464,7 +464,122 @@ func (c cxl_dvsec_id) String() string {
 	return "unknown"
 }
 
-// define for RCRB struct
+// define for memory mapped registers
+// define for CXL Component Registers
+
+type COMPONENT_REG_HEADER struct {
+	Capability_ID      uint16
+	Capability_Version bitfield_4b
+	Cache_Mem_Version  bitfield_4b
+	Array_Size         uint8
+}
+type COMPONENT_CAPABILITIES_HEADER struct {
+	Capability_ID      uint16
+	Capability_Version bitfield_4b
+	Capability_Pointer bitfield_12b
+}
+
+type CMPREG_RAS_CAP struct {
+	Uncorrectable_Error_Status_Register   uint32
+	Uncorrectable_Error_Mask_Register     uint32
+	Uncorrectable_Error_Severity_Register uint32
+	Correctable_Error_Status_Register     uint32
+	Correctable_Error_Mask_Register       uint32
+	Error_Capability_and_Control_Register uint32
+	Header_Log_Registers                  uint32
+}
+type CMPREG_LINK_CAP struct {
+	CXL_Link_Layer_Capability_Register        uint32
+	CXL_Link_Control_and_Status_Register      uint32
+	CXL_Link_Rx_Credit_Control_Register       uint32
+	CXL_Link_Rx_Credit_Return_Status_Register uint32
+	CXL_Link_Tx_Credit_Status_Register        uint32
+	CXL_Link_Ack_Timer_Control_Register       uint32
+	CXL_Link_Defeature_Register               uint32
+}
+
+type HDM_DECODER struct {
+	Base_Low      uint32
+	Base_High     uint32
+	Size_Low      uint32
+	Size_High     uint32
+	Control       uint32
+	DPA_Skip_Low  uint32
+	DPA_Skip_High uint32
+	Reserved      uint32
+}
+
+type HDM_DECODER_CAP struct {
+	Decoder_Cnt                       bitfield_4b
+	Target_Cnt                        bitfield_4b
+	A11to8_Interleave_Capable         bitfield_1b
+	A14to12_Interleave_Capable        bitfield_1b
+	Poison_On_Decode_Error_Capability bitfield_1b
+	Interleave_Capable_3_6_12_Way_    bitfield_1b
+	Interleave_Capable_16_Way         bitfield_1b
+	UIO_Capable                       bitfield_1b
+	Reserved                          bitfield_2b
+	UIO_Capable_Decoder_Count         bitfield_4b
+	MemData_NXM_Capable               bitfield_1b
+	Reserved2                         bitfield_11b
+}
+
+func (h *HDM_DECODER_CAP) getDecoderCounts() uint {
+	switch h.Decoder_Cnt {
+	case 0:
+		return 1
+	case 1, 2, 3, 4, 5, 6, 7, 8:
+		return uint(h.Decoder_Cnt) * 2
+	case 9, 10, 11, 12:
+		return uint(h.Decoder_Cnt-4) * 4
+	default:
+		return 0
+	}
+}
+
+type HDM_DECODER_GLOBAL_CONTROL struct {
+	Poison_On_Decod_Err_En bitfield_1b
+	HDMM_Decoder_En        bitfield_1b
+	Reserved               bitfield_30b
+}
+
+type cmpreg_hdm_decoder_cap_struct struct {
+	HDM_Decoder_Cap            HDM_DECODER_CAP
+	HDM_Decoder_Global_Control HDM_DECODER_GLOBAL_CONTROL
+	Reserved                   uint32
+	Reserved2                  uint32
+	HDM_Decoder                []HDM_DECODER
+}
+
+func CMPREG_HDM_DECODER_CAP(Size uint) cmpreg_hdm_decoder_cap_struct {
+	slice := make([]HDM_DECODER, Size)
+	return cmpreg_hdm_decoder_cap_struct{
+		HDM_Decoder: slice,
+	}
+}
+
+// CXL_Capability_ID Assignment
+type cxl_cmp_cap_id uint16
+
+const (
+	CXL_CMPREG_NULL                     cxl_cmp_cap_id = iota // 0
+	CXL_CMPREG_CAP                                            // 1
+	CXL_CMPREG_RAS_CAP                                        // 2
+	CXL_CMPREG_SECURE_CAP                                     // 3
+	CXL_CMPREG_LINK_CAP                                       // 4
+	CXL_CMPREG_HDM_DECODER_CAP                                // 5
+	CXL_CMPREG_EXT_SECURE_CAP                                 // 6
+	CXL_CMPREG_IDE_CAP                                        // 7
+	CXL_CMPREG_SNOOP_FLT_CAP                                  // 8
+	CXL_CMPREG_TIMEOUT_N_ISOLATION_CAP                        // 9
+	CXL_CMPREG_CACEHMEM_EXT_CAP                               // A
+	CXL_CMPREG_BI_ROUTE_TABLE_CAP                             // B
+	CXL_CMPREG_BI_DECODER_CAP                                 // C
+	CXL_CMPREG_CACHE_ID_ROUTE_TABLE_CAP                       // D
+	CXL_CMPREG_CACHE_ID_DECODER_CAP                           // E
+	CXL_CMPREG_EXT_HDM_DECODER_CAP                            // F
+)
+
 // define for CXL Memory Device Registers struct
 type CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
 	Capability_ID      uint16

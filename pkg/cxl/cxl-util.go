@@ -121,9 +121,9 @@ func (a *ACPI) CedtHeaderSize() int {
 
 // Get subtable cedt struct by offset.
 func (a *ACPI) GetCedtSubtable(ofs int) interface{} {
-	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE_STRUCT{})
+	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE{})
 	switch cedt_struct_types(subT.Type) {
-	case ACPI_CEDT_CXL_HOST_BRIDGE_STRUCT:
+	case ACPI_CEDT_CXL_HOST_BRIDGE:
 		return subT
 	case ACPI_CEDT_CXL_FIXED_MEMORY_WINDOW:
 		tempT := parseStruct(a.CEDT[ofs:], cedt_cxl_fixed_memory_window_struct{})
@@ -140,7 +140,7 @@ func (a *ACPI) GetCedtSubtable(ofs int) interface{} {
 // Get subtable cedt struct size in bytes.
 func (a *ACPI) GetCedtSubtableSize(ofs int) int {
 	// All sub tables shares the same header so we can use any table to get the size
-	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE_STRUCT{})
+	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE{})
 	return int(subT.Record_Length)
 }
 
@@ -151,6 +151,13 @@ type CxlDev struct {
 	CXLdevtype CxlDevType                `json:"CXL-Type"`
 	PCIE       []byte                    `json:"-"`
 	Memdev     *CxlMemoryDeviceRegisters `json:"-"`
+	CmpReg     *CxlComponentRegistersPtr `json:"-"`
+}
+
+type CxlComponentRegistersPtr struct {
+	Ras_Cap         *CMPREG_RAS_CAP
+	Link_Cap        *CMPREG_LINK_CAP
+	HDM_Decoder_Cap *cmpreg_hdm_decoder_cap_struct
 }
 
 // initialize the structure based on BDF value
@@ -172,8 +179,9 @@ func (c *CxlDev) init(b *BDF) error {
 				bir := blk.Register_Offset_Low.Register_BIR
 				baseAddr := int64(pcieHeader.Base_Address_Registers[bir].Base_Address<<4) | int64(blk.Register_Offset_Low.Register_Block_Offset_Low) | int64(blk.Register_Offset_High.Register_Block_Offset_High)<<32
 
-				// if blk.Register_Offset_Low.Register_Block_Identifier == 1 { //component registers
-				// }
+				if blk.Register_Offset_Low.Register_Block_Identifier == 1 { //component registers
+					c.parseComReg(baseAddr)
+				}
 				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
 					reg := readMemory4k(baseAddr)
 					cxlMemDevCap := parseStruct(reg, CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER{})
@@ -202,6 +210,43 @@ func (c *CxlDev) isCxlDev() bool {
 // check if a device is RCD ( CXL 1.1 device )
 func (c *CxlDev) isCxlRcd() bool {
 	return c.CXLrev == CXL_REV_1_1
+}
+
+// parse component register from address
+func (c *CxlDev) parseComReg(addrBase int64) {
+	cmpReg := CxlComponentRegistersPtr{}
+	reg := readMemory4k(addrBase + 0x1000)
+	comRegCapHdr := parseStruct(reg, COMPONENT_REG_HEADER{})
+	for i := uint8(0); i < comRegCapHdr.Array_Size; i++ {
+		comRegCapPtr := parseStruct(reg[4*(i+1):], COMPONENT_CAPABILITIES_HEADER{})
+		switch cxl_cmp_cap_id(comRegCapPtr.Capability_ID) {
+		case CXL_CMPREG_RAS_CAP: //2
+			capStruct := parseStruct(reg[comRegCapPtr.Capability_Pointer:], CMPREG_RAS_CAP{})
+			cmpReg.Ras_Cap = &capStruct
+		case CXL_CMPREG_LINK_CAP: // 4
+			capStruct := parseStruct(reg[comRegCapPtr.Capability_Pointer:], CMPREG_LINK_CAP{})
+			cmpReg.Link_Cap = &capStruct
+		case CXL_CMPREG_HDM_DECODER_CAP: // 5
+			hdmDecoderCapHdr := parseStruct(reg[comRegCapPtr.Capability_Pointer:], HDM_DECODER_CAP{})
+			capStruct := parseStruct(reg[comRegCapPtr.Capability_Pointer:], CMPREG_HDM_DECODER_CAP(hdmDecoderCapHdr.getDecoderCounts()))
+			cmpReg.HDM_Decoder_Cap = &capStruct
+		case CXL_CMPREG_NULL, // 0
+			CXL_CMPREG_CAP,                      // 1
+			CXL_CMPREG_SECURE_CAP,               // 3
+			CXL_CMPREG_EXT_SECURE_CAP,           // 6
+			CXL_CMPREG_IDE_CAP,                  // 7
+			CXL_CMPREG_SNOOP_FLT_CAP,            // 8
+			CXL_CMPREG_TIMEOUT_N_ISOLATION_CAP,  // 9
+			CXL_CMPREG_CACEHMEM_EXT_CAP,         // A
+			CXL_CMPREG_BI_ROUTE_TABLE_CAP,       // B
+			CXL_CMPREG_BI_DECODER_CAP,           // C
+			CXL_CMPREG_CACHE_ID_ROUTE_TABLE_CAP, // D
+			CXL_CMPREG_CACHE_ID_DECODER_CAP,     // E
+			CXL_CMPREG_EXT_HDM_DECODER_CAP:      // F
+			fmt.Printf("Component Reg [%d] is not supported yet", comRegCapPtr.Capability_ID)
+		}
+	}
+	c.CmpReg = &cmpReg
 }
 
 // Update local copy of the pcie config .
