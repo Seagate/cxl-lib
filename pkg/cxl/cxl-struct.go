@@ -581,7 +581,7 @@ const (
 )
 
 // define for CXL Memory Device Registers struct
-type CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
+type DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
 	Capability_ID      uint16
 	Version            uint8
 	Reserved           uint8
@@ -589,7 +589,7 @@ type CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
 	Reserved2          [10]uint8
 }
 
-type CXL_DEVICE_CAPABILITIES_HEADER struct {
+type DEVICE_CAPABILITIES_HEADER struct {
 	Capability_ID uint16
 	Version       uint8
 	Reserved      uint8
@@ -598,19 +598,50 @@ type CXL_DEVICE_CAPABILITIES_HEADER struct {
 	Reserved2     uint32
 }
 
-type CxlMemoryDeviceRegisters struct {
-	CXL_Device_Capabilities_Array_Register CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER
-	CXL_Device_Capability_Header           []CXL_DEVICE_CAPABILITIES_HEADER
-	CXL_Device_Capability                  []byte
+type MemoryDeviceRegisters struct {
+	Device_Capabilities_Array_Register DEVICE_CAPABILITIES_ARRAY_REGISTER
+	Device_Capability_Header           []DEVICE_CAPABILITIES_HEADER
+	Device_Capability                  []byte
 }
 
-func CXL_MEMORY_DEVICE_REGISTERS(Size uint) CxlMemoryDeviceRegisters { // CXL Memory device register has fixed size of 4K
-	slice := make([]CXL_DEVICE_CAPABILITIES_HEADER, Size)
-	slice2 := make([]byte, 4096-16-16*Size)
-	return CxlMemoryDeviceRegisters{
-		CXL_Device_Capability_Header: slice,
-		CXL_Device_Capability:        slice2,
+func (c *MemoryDeviceRegisters) GetCapabilityByteArray(i int) []byte {
+	if i > int(c.Device_Capabilities_Array_Register.Capabilities_Count) {
+		return []byte{}
 	}
+	oft := c.Device_Capability_Header[i].Offset - 16*(1+uint32(c.Device_Capabilities_Array_Register.Capabilities_Count)) // offset minus header size
+	length := c.Device_Capability_Header[i].Length
+	return c.Device_Capability[oft : oft+length]
+}
+
+func CXL_MEMORY_DEVICE_REGISTERS(Size uint) MemoryDeviceRegisters { // CXL Memory device register has fixed size of 4K
+	slice := make([]DEVICE_CAPABILITIES_HEADER, Size)
+	slice2 := make([]byte, 4096-16-16*Size)
+	return MemoryDeviceRegisters{
+		Device_Capability_Header: slice,
+		Device_Capability:        slice2,
+	}
+}
+
+const (
+	CXL_MEMDEV_STATUS            = 1
+	CXL_MEMDEV_PRIMARY_MAILBOX   = 2
+	CXL_MEMDEV_SECONDARY_MAILBOX = 3
+	CXL_MEMDEV_MEMDEV_STATUS     = 0x4000
+)
+
+type MEMDEV_DEVICE_STATUS struct {
+	Event_Status uint32
+	Reserved     uint32
+}
+
+type MEMDEV_MEMDEV_STATUS struct {
+	Device_Fatal             bitfield_1b
+	FW_Halt                  bitfield_1b
+	Media_Status             bitfield_2b
+	Mailbox_Interfaces_Ready bitfield_1b
+	Reset_Needed             bitfield_3b
+	Reserved                 bitfield_24b
+	Reserved2                uint32
 }
 
 // define for CXL Mailbox struct

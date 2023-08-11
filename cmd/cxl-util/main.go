@@ -153,10 +153,12 @@ func main() {
 
 			if dev.Memdev != nil {
 				fmt.Printf("\nCXL Device Capabilities Array Register:\n")
-				PrintTableToStdout(dev.Memdev.CXL_Device_Capabilities_Array_Register, "   ", "   ")
-				for i, cap := range dev.Memdev.CXL_Device_Capability_Header {
+				PrintTableToStdout(dev.Memdev.Device_Capabilities_Array_Register, "   ", "   ")
+				for i, cap := range dev.Memdev.Device_Capability_Header {
 					fmt.Printf("\nCXL Device Capability %d Header:\n", i)
 					PrintTableToStdout(cap, "   ", "   ")
+					fmt.Printf("\nCXL Device Capability %d Content:\n", i)
+					PrintTableToStdout(dev.GetMemDevRegStruct(i), "   ", "   ")
 				}
 			}
 

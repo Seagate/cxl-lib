@@ -145,16 +145,16 @@ func (a *ACPI) GetCedtSubtableSize(ofs int) int {
 }
 
 type CxlDev struct {
-	Bdf        *BDF                      `json:"BDF"`
-	Vendor     string                    `json:"Vendor"`
-	CXLrev     CxlRev                    `json:"CXL-Rev"`
-	CXLdevtype CxlDevType                `json:"CXL-Type"`
-	PCIE       []byte                    `json:"-"`
-	Memdev     *CxlMemoryDeviceRegisters `json:"-"`
-	CmpReg     *CxlComponentRegistersPtr `json:"-"`
+	Bdf        *BDF                   `json:"BDF"`
+	Vendor     string                 `json:"Vendor"`
+	CXLrev     CxlRev                 `json:"CXL-Rev"`
+	CXLdevtype CxlDevType             `json:"CXL-Type"`
+	PCIE       []byte                 `json:"-"`
+	Memdev     *MemoryDeviceRegisters `json:"-"`
+	CmpReg     *ComponentRegistersPtr `json:"-"`
 }
 
-type CxlComponentRegistersPtr struct {
+type ComponentRegistersPtr struct {
 	Ras_Cap         *CMPREG_RAS_CAP
 	Link_Cap        *CMPREG_LINK_CAP
 	HDM_Decoder_Cap *cmpreg_hdm_decoder_cap_struct
@@ -184,7 +184,7 @@ func (c *CxlDev) init(b *BDF) error {
 				}
 				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
 					reg := readMemory4k(baseAddr)
-					cxlMemDevCap := parseStruct(reg, CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER{})
+					cxlMemDevCap := parseStruct(reg, DEVICE_CAPABILITIES_ARRAY_REGISTER{})
 					parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
 					c.Memdev = &parsedCxlMemDevCap
 				}
@@ -214,7 +214,7 @@ func (c *CxlDev) isCxlRcd() bool {
 
 // parse component register from address
 func (c *CxlDev) parseComReg(addrBase int64) {
-	cmpReg := CxlComponentRegistersPtr{}
+	cmpReg := ComponentRegistersPtr{}
 	reg := readMemory4k(addrBase + 0x1000)
 	comRegCapHdr := parseStruct(reg, COMPONENT_REG_HEADER{})
 	for i := uint8(0); i < comRegCapHdr.Array_Size; i++ {
@@ -403,6 +403,25 @@ func (c *CxlDev) GetVendorInfo() string {
 func (c *CxlDev) GetDeviceInfo() string {
 	pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
 	return fmt.Sprintf("0x%X", pcieHeader.Device_ID)
+}
+
+// parse mem dev register from index
+func (c *CxlDev) GetMemDevRegStruct(i int) any {
+	if i >= int(c.Memdev.Device_Capabilities_Array_Register.Capabilities_Count) {
+		return nil
+	}
+	hdr := c.Memdev.Device_Capability_Header[i]
+	tbl := c.Memdev.GetCapabilityByteArray(i)
+	switch hdr.Capability_ID {
+	case CXL_MEMDEV_STATUS:
+		return parseStruct(tbl, MEMDEV_DEVICE_STATUS{})
+	case CXL_MEMDEV_PRIMARY_MAILBOX:
+		return parseStruct(tbl, MAILBOX_REGISTERS_CLASS(uint(hdr.Length)))
+	case CXL_MEMDEV_MEMDEV_STATUS:
+		return parseStruct(tbl, MEMDEV_MEMDEV_STATUS{})
+	default:
+		return nil
+	}
 }
 
 // obtain a list of CXL devices on the host
