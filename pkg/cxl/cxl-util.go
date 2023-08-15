@@ -160,6 +160,7 @@ type CxlDev struct {
 	PCIE       []byte                 `json:"-"`
 	Memdev     *MemoryDeviceRegisters `json:"-"`
 	CmpReg     *ComponentRegistersPtr `json:"-"`
+	MailboxCCI *CXLMailbox            `json:"-"`
 }
 
 type ComponentRegistersPtr struct {
@@ -195,6 +196,17 @@ func (c *CxlDev) init(b *BDF) error {
 					cxlMemDevCap := parseStruct(reg, DEVICE_CAPABILITIES_ARRAY_REGISTER{})
 					parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
 					c.Memdev = &parsedCxlMemDevCap
+					// c.initMailBox()
+					klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: %s 0x%X", "RegLoc_baseAddr", baseAddr)
+					for _, cap := range c.Memdev.Device_Capability_Header {
+						if cap.Capability_ID == CXL_MEMDEV_PRIMARY_MAILBOX {
+							klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: Base Addr 0x%X oft 0x%X length 0x%X", baseAddr, cap.Offset, cap.Length)
+							mb := CXLMailbox{}
+							mb.init(baseAddr+int64(cap.Offset), int(cap.Length))
+							c.MailboxCCI = &mb
+						}
+
+					}
 				}
 			}
 		}
@@ -349,15 +361,6 @@ func (c *CxlDev) GetCxlCap() CxlCaps {
 	}
 }
 
-// convert integer to bool
-func UintToBool(i bitfield_1b) bool {
-	if i == 1 {
-		return true
-	} else {
-		return false
-	}
-}
-
 // return the type info of the CXL device ( type 1/ type 2/ type 3 )
 // Type 1 - CXL.cache and CXL.io
 // Type 2 - CXM.mem and CXL.cache and CXL.io
@@ -424,7 +427,7 @@ func (c *CxlDev) GetMemDevRegStruct(i int) any {
 	case CXL_MEMDEV_STATUS:
 		return parseStruct(tbl, MEMDEV_DEVICE_STATUS{})
 	case CXL_MEMDEV_PRIMARY_MAILBOX:
-		return parseStruct(tbl, MAILBOX_REGISTERS_CLASS(uint(hdr.Length)))
+		return parseStruct(tbl, mailbox_registers{})
 	case CXL_MEMDEV_MEMDEV_STATUS:
 		return parseStruct(tbl, MEMDEV_MEMDEV_STATUS{})
 	default:
@@ -607,4 +610,13 @@ func hexToInt(hexStr string) uint64 {
 // Wrapper function to shorten int to hex convertion call
 func hex(a any) string {
 	return fmt.Sprintf("%X", a)
+}
+
+// convert integer to bool
+func UintToBool(i bitfield_1b) bool {
+	if i == 1 {
+		return true
+	} else {
+		return false
+	}
 }
