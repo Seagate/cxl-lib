@@ -49,9 +49,9 @@ func (mb *CXLMailbox) init(BaseAddr int64, bufSize int) error {
 }
 
 // General mailbox command flow
-func (mb *CXLMailbox) Mailbox_cmd(opcode uint16, payload any) (uint16, []uint32) {
+func (mb *CXLMailbox) Mailbox_cmd(opcode uint16, payload []byte) (uint16, []byte) {
 	var RC uint16
-	var PL []uint32
+	var PL []byte
 	//1. Caller reads MB Control Register to verify doorbell is clear
 	if mb.mailbox_read_doorbell() {
 		fmt.Print("Mailbox is busy. Try again later.")
@@ -63,7 +63,7 @@ func (mb *CXLMailbox) Mailbox_cmd(opcode uint16, payload any) (uint16, []uint32)
 
 	//3. Caller writes Command Payload Registers if input payload is non-empty
 	if payload != nil {
-		mb.mailbox_write_cmd_payload(structtoU32(payload))
+		mb.mailbox_write_cmd_payload(payload)
 	} else {
 		mb.mailbox_clear_payload_length()
 	}
@@ -99,11 +99,11 @@ func (mb *CXLMailbox) mailbox_read_doorbell() bool {
 func (mb *CXLMailbox) mailbox_write_cmd_regs(opcode uint16) {
 	MAILBOX_COMMAND_REGISTER_COMMAND_OPCODE.write(&mb.mailbox.Command_Register, uint64(opcode))
 }
-func (mb *CXLMailbox) mailbox_write_cmd_payload(payload []uint32) {
-	for i, pl := range payload {
+func (mb *CXLMailbox) mailbox_write_cmd_payload(payload []byte) {
+	for i, pl := range bytetoU32(payload) {
 		mb.mailbox.Commmand_Payload_Registers[i] = pl
 	}
-	MAILBOX_COMMAND_REGISTER_PAYLOAD_LENGTH.write(&mb.mailbox.Command_Register, uint64(len(payload)*4))
+	MAILBOX_COMMAND_REGISTER_PAYLOAD_LENGTH.write(&mb.mailbox.Command_Register, uint64(len(payload)))
 }
 func (mb *CXLMailbox) mailbox_check_doorbell() bool {
 	check_count := 0
@@ -120,15 +120,15 @@ func (mb *CXLMailbox) mailbox_check_doorbell() bool {
 func (mb *CXLMailbox) mailbox_set_doorbell() {
 	MAILBOX_CONTROL_REGISTER_DOORBELL.write(&mb.mailbox.MB_Control, 1)
 }
-
 func (mb *CXLMailbox) mailbox_read_status() uint16 {
 	return uint16(MAILBOX_STATUS_REGISTER_RETURN_CODE.read(mb.mailbox.MB_Status))
 }
-func (mb *CXLMailbox) mailbox_read_payload_length() uint32 {
-	return uint32(MAILBOX_COMMAND_REGISTER_PAYLOAD_LENGTH.read(mb.mailbox.Command_Register))
+func (mb *CXLMailbox) mailbox_read_payload_length() int {
+	return int(MAILBOX_COMMAND_REGISTER_PAYLOAD_LENGTH.read(mb.mailbox.Command_Register))
 }
-func (mb *CXLMailbox) mailbox_read_payload(PL_length uint32) []uint32 {
-	return mb.mailbox.Commmand_Payload_Registers[:PL_length]
+func (mb *CXLMailbox) mailbox_read_payload(PL_length int) []byte {
+	wholePL := u32toByte(mb.mailbox.Commmand_Payload_Registers[:])
+	return wholePL[:PL_length]
 }
 func (mb *CXLMailbox) mailbox_clear_payload_length() {
 	MAILBOX_COMMAND_REGISTER_PAYLOAD_LENGTH.write(&mb.mailbox.Command_Register, 0)
@@ -138,7 +138,7 @@ func (mb *CXLMailbox) mailbox_clear_payload_length() {
 func (mb *CXLMailbox) Mailbox_cmd_get_event_interrupt_policy() *GET_EVENT_INTERRUPT_POLICY_OUTPUT {
 	RC, PL := mb.Mailbox_cmd(0x0102, nil)
 	if RC == 0 {
-		EIP := parseStruct(u32toByte(PL), GET_EVENT_INTERRUPT_POLICY_OUTPUT{})
+		EIP := parseStruct(PL, GET_EVENT_INTERRUPT_POLICY_OUTPUT{})
 		return &EIP
 	} else {
 		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
@@ -148,7 +148,7 @@ func (mb *CXLMailbox) Mailbox_cmd_get_event_interrupt_policy() *GET_EVENT_INTERR
 func (mb *CXLMailbox) Mailbox_cmd_get_fw_info() *GET_FW_INFO_OUTPUT {
 	RC, PL := mb.Mailbox_cmd(0x0200, nil)
 	if RC == 0 {
-		FW_info := parseStruct(u32toByte(PL), GET_FW_INFO_OUTPUT{})
+		FW_info := parseStruct(PL, GET_FW_INFO_OUTPUT{})
 		return &FW_info
 	} else {
 		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
@@ -159,8 +159,8 @@ func (mb *CXLMailbox) Mailbox_cmd_get_fw_info() *GET_FW_INFO_OUTPUT {
 func (mb *CXLMailbox) Mailbox_cmd_get_supported_logs() *get_supported_logs_output {
 	RC, PL := mb.Mailbox_cmd(0x0400, nil)
 	if RC == 0 {
-		SL := parseStruct(u32toByte(PL), GET_SUPPORTED_LOGS_OUTPUT(0)) // variable size
-		SL = parseStruct(u32toByte(PL), GET_SUPPORTED_LOGS_OUTPUT(uint(SL.Number_of_Suppoorted_Log_Entries)))
+		SL := parseStruct(PL, GET_SUPPORTED_LOGS_OUTPUT(0)) // variable size
+		SL = parseStruct(PL, GET_SUPPORTED_LOGS_OUTPUT(uint(SL.Number_of_Suppoorted_Log_Entries)))
 		return &SL
 	} else {
 		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
@@ -171,7 +171,7 @@ func (mb *CXLMailbox) Mailbox_cmd_identify_memory_device() *IDENTIFY_MEMORY_DEVI
 
 	RC, PL := mb.Mailbox_cmd(0x4000, nil)
 	if RC == 0 {
-		device_info := parseStruct(u32toByte(PL), IDENTIFY_MEMORY_DEVICE_OUTPUT{}) // variable size
+		device_info := parseStruct(PL, IDENTIFY_MEMORY_DEVICE_OUTPUT{}) // variable size
 		return &device_info
 	} else {
 		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
