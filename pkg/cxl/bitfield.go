@@ -61,10 +61,10 @@ func StructSize(s any) int {
 // it returns the length of the slice times the element size and does not count the memory
 // occupied by the header. If the type of v is not acceptable, dataSize returns -1.
 func dataSize(v reflect.Value) int {
-	klog.V(4).InfoS("bitfield.dataSize", "type", v.Type().Name(), "kind", v.Kind().String())
+	klog.V(DBG_LVL_DEEP_DETAIL).InfoS("bitfield.dataSize", "type", v.Type().Name(), "kind", v.Kind().String())
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
-		klog.V(4).InfoS("bitfield.dataSize", "len", v.Len())
+		klog.V(DBG_LVL_DEEP_DETAIL).InfoS("bitfield.dataSize", "len", v.Len())
 		if v.Len() == 0 { // deal with empty slice
 			return 0
 		}
@@ -85,7 +85,7 @@ func dataSize(v reflect.Value) int {
 		return sum
 
 	default:
-		klog.V(2).InfoS("bitfield.dataSize", "Size", v.Type().Size())
+		klog.V(DBG_LVL_INFO).InfoS("bitfield.dataSize", "Size", v.Type().Size())
 		return int(v.Type().Size())
 	}
 }
@@ -113,7 +113,7 @@ func BitFieldRead(r io.Reader, data any) error {
 
 	v := reflect.ValueOf(data)
 	size := -1
-	klog.V(4).InfoS("bitfield.BitFieldRead", "type", reflect.TypeOf(data).String(), "kind", v.Kind().String())
+	klog.V(DBG_LVL_DEEP_DETAIL).InfoS("bitfield.BitFieldRead", "type", reflect.TypeOf(data).String(), "kind", v.Kind().String())
 	switch v.Kind() {
 	case reflect.Pointer:
 		v = v.Elem()
@@ -145,7 +145,7 @@ func ReadByBit(r io.Reader, buf []byte, m []int) {
 		bitWidthMask := uint64((1 << width) - 1)
 		bitShift := bitOfs - startByte*8
 		val := uint64(0)
-		klog.V(4).InfoS("bitfield.ReadByBit", "bitOfs", bitOfs, "bitWidth", width, "endBit", endBit, "startByte", startByte, "endByte", endByte, "bitShift", bitShift, "bitWidthMask", hex(bitWidthMask))
+		klog.V(DBG_LVL_DEEP_DETAIL).InfoS("bitfield.ReadByBit", "bitOfs", bitOfs, "bitWidth", width, "endBit", endBit, "startByte", startByte, "endByte", endByte, "bitShift", bitShift, "bitWidthMask", hex(bitWidthMask))
 
 		// extract related field into a uint32, and then apply the shift and mask
 		structByteSize := endByte - startByte
@@ -269,7 +269,7 @@ func bitSizeOfArray(v reflect.Value) []int {
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
 		return []int{int(t.Size()) * 8}
 	}
-	klog.V(2).InfoS("bitfield.bitSizeOfArray error", "kind", t.Kind().String())
+	klog.V(DBG_LVL_INFO).InfoS("bitfield.bitSizeOfArray error", "kind", t.Kind().String())
 
 	return []int{}
 }

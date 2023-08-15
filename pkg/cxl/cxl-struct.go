@@ -604,13 +604,13 @@ type MemoryDeviceRegisters struct {
 	Device_Capability                  []byte
 }
 
-func (c *MemoryDeviceRegisters) GetCapabilityByteArray(i int) []byte {
-	if i > int(c.Device_Capabilities_Array_Register.Capabilities_Count) {
+func (m *MemoryDeviceRegisters) GetCapabilityByteArray(i int) []byte {
+	if i > int(m.Device_Capabilities_Array_Register.Capabilities_Count) {
 		return []byte{}
 	}
-	oft := c.Device_Capability_Header[i].Offset - 16*(1+uint32(c.Device_Capabilities_Array_Register.Capabilities_Count)) // offset minus header size
-	length := c.Device_Capability_Header[i].Length
-	return c.Device_Capability[oft : oft+length]
+	oft := m.Device_Capability_Header[i].Offset - 16*(1+uint32(m.Device_Capabilities_Array_Register.Capabilities_Count)) // offset minus header size
+	length := m.Device_Capability_Header[i].Length
+	return m.Device_Capability[oft : oft+length]
 }
 
 func CXL_MEMORY_DEVICE_REGISTERS(Size uint) MemoryDeviceRegisters { // CXL Memory device register has fixed size of 4K

@@ -18,6 +18,14 @@ import (
 	_ "embed"
 )
 
+const (
+	DBG_LVL_DEFAUILT    = iota //0
+	DBG_LVL_BASIC              //1
+	DBG_LVL_INFO               //2
+	DBG_LVL_DETAIL             //3
+	DBG_LVL_DEEP_DETAIL        //4
+)
+
 //go:embed "pci.ids"
 var pci_ids string
 
@@ -104,7 +112,7 @@ func (a *ACPI) FetchCedt() {
 			a.CEDT = b
 		}
 	} else {
-		klog.V(1).Info(err)
+		klog.V(DBG_LVL_BASIC).Info(err)
 	}
 }
 
@@ -198,7 +206,7 @@ func (c *CxlDev) init(b *BDF) error {
 // check if a device is CXL memory device.
 func (c *CxlDev) isCxlDev() bool {
 	pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
-	klog.V(3).InfoS("InfoS structured:   cxl-util: isCXLDev", "Vendor", hex(pcieHeader.Vendor_ID), "device", hex(pcieHeader.Device_ID), "class", hex(pcieHeader.Class_Code.Base_Class_Code), "sub", hex(pcieHeader.Class_Code.Sub_Class_Code), "prog-if", hex(pcieHeader.Class_Code.Prog_if))
+	klog.V(DBG_LVL_DETAIL).InfoS("InfoS structured:   cxl-util: isCXLDev", "Vendor", hex(pcieHeader.Vendor_ID), "device", hex(pcieHeader.Device_ID), "class", hex(pcieHeader.Class_Code.Base_Class_Code), "sub", hex(pcieHeader.Class_Code.Sub_Class_Code), "prog-if", hex(pcieHeader.Class_Code.Prog_if))
 	if pcieHeader.Class_Code.Base_Class_Code == 0x5 && // 0x05: Memory Controller
 		pcieHeader.Class_Code.Sub_Class_Code == 0x2 && // 0x02: CXL memory devic
 		pcieHeader.Class_Code.Prog_if == 0x10 { // 0x10: Always 0x10 per spec
@@ -438,12 +446,12 @@ func InitCxlDevList() map[string]*CxlDev {
 		bdf := BDF{}
 		// Convert the Linux fs format to structure
 		bdf.addrToBDF(link.Name())
-		klog.V(3).InfoS("cxl-util.InitCxlDevList", "Addr", hex(bdf.bdfToMemAddr()))
+		klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.InitCxlDevList", "Addr", hex(bdf.bdfToMemAddr()))
 		if checkCxlDevClass(link.Name()) {
 			new_CxlDev := CxlDev{}
 			err = new_CxlDev.init(&bdf)
 			if err == nil && new_CxlDev.isCxlDev() {
-				klog.V(2).InfoS("cxl-util.InitCxlDevList Device found", "Link", link.Name())
+				klog.V(DBG_LVL_INFO).InfoS("cxl-util.InitCxlDevList Device found", "Link", link.Name())
 				CxlDevMap[new_CxlDev.GetBdfString()] = &new_CxlDev
 			}
 		}
@@ -455,7 +463,7 @@ func InitCxlDevList() map[string]*CxlDev {
 func checkCxlDevClass(link string) bool {
 	path := fmt.Sprintf("/sys/bus/pci/devices/%s/class", link)
 	fileBytes, err := os.ReadFile(path)
-	klog.V(3).InfoS("cxl-util.checkCxlDevClass", "Link", path, "file", fileBytes)
+	klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.checkCxlDevClass", "Link", path, "file", fileBytes)
 	if fileBytes != nil && err == nil {
 		if string(fileBytes) == "0x050210\n" {
 			return true
@@ -470,7 +478,7 @@ func readMemory4k(baseAddress int64) []byte {
 	const bufferSize int = 4096
 
 	// Check for 4k boundary align
-	klog.V(2).InfoS("cxl-util.readMemory4k", "BaseAddress", hex(baseAddress))
+	klog.V(DBG_LVL_INFO).InfoS("cxl-util.readMemory4k", "BaseAddress", hex(baseAddress))
 	if baseAddress&int64(bufferSize-1) != 0 {
 		klog.Fatal(fmt.Errorf("BaseAddress is not 4k aligned"))
 	}
@@ -479,7 +487,7 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(3).Info("cxl-util.readMemory4k /dev/mem is opened")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k /dev/mem is opened")
 
 	defer file.Close()
 
@@ -487,7 +495,7 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(3).Info("cxl-util.readMemory4k Mmap is done")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k Mmap is done")
 
 	mmapCp := make([]byte, bufferSize)
 	// Save a copy of mmap, which will be elimicated after syscall.Munmap(mmap)
@@ -500,7 +508,7 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(3).Info("cxl-util.readMemory4k Munmap is done")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k Munmap is done")
 	return mmapCp
 }
 
