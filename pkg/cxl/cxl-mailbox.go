@@ -135,6 +135,50 @@ func (mb *CXLMailbox) mailbox_clear_payload_length() {
 }
 
 // //////////////////////////////////////// Mailbox command for each Opcode
+func (mb *CXLMailbox) Mailbox_cmd_get_event_interrupt_policy() *GET_EVENT_INTERRUPT_POLICY_OUTPUT {
+	RC, PL := mb.Mailbox_cmd(0x0102, nil)
+	if RC == 0 {
+		EIP := parseStruct(u32toByte(PL), GET_EVENT_INTERRUPT_POLICY_OUTPUT{})
+		return &EIP
+	} else {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		return nil
+	}
+}
+func (mb *CXLMailbox) Mailbox_cmd_get_fw_info() *GET_FW_INFO_OUTPUT {
+	RC, PL := mb.Mailbox_cmd(0x0200, nil)
+	if RC == 0 {
+		FW_info := parseStruct(u32toByte(PL), GET_FW_INFO_OUTPUT{})
+		return &FW_info
+	} else {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		return nil
+	}
+}
+
+func (mb *CXLMailbox) Mailbox_cmd_get_supported_logs() *get_supported_logs_output {
+	RC, PL := mb.Mailbox_cmd(0x0400, nil)
+	if RC == 0 {
+		SL := parseStruct(u32toByte(PL), GET_SUPPORTED_LOGS_OUTPUT(0)) // variable size
+		SL = parseStruct(u32toByte(PL), GET_SUPPORTED_LOGS_OUTPUT(uint(SL.Number_of_Suppoorted_Log_Entries)))
+		return &SL
+	} else {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		return nil
+	}
+}
+func (mb *CXLMailbox) Mailbox_cmd_identify_memory_device() *IDENTIFY_MEMORY_DEVICE_OUTPUT {
+
+	RC, PL := mb.Mailbox_cmd(0x4000, nil)
+	if RC == 0 {
+		device_info := parseStruct(u32toByte(PL), IDENTIFY_MEMORY_DEVICE_OUTPUT{}) // variable size
+		return &device_info
+	} else {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		return nil
+	}
+}
+
 
 func print_struct_table(table any) {
 	s, _ := json.MarshalIndent(table, "   ", "   ")
