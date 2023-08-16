@@ -135,6 +135,42 @@ func (mb *CXLMailbox) mailbox_clear_payload_length() {
 }
 
 // //////////////////////////////////////// Mailbox command for each Opcode
+func (mb *CXLMailbox) Mailbox_cmd_get_event_records(event uint8) *get_event_records_output {
+	if event > 3 {
+		fmt.Print("Invalid event")
+		return nil
+	}
+
+	payload_reg := []byte{event}
+	RC, PL := mb.Mailbox_cmd(0x0100, payload_reg)
+	if RC == 0 {
+		tmpEventRecord := parseStruct(PL, get_event_records_output{}) // table size various
+		EventRecord := parseStruct(PL, GET_EVENT_RECORDS_OUTPUT(uint(tmpEventRecord.Event_Record_Count)))
+		return &EventRecord
+	} else {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		return nil
+	}
+}
+
+func (mb *CXLMailbox) Mailbox_cmd_clear_event_records(event uint8) uint16 {
+	if event > 3 {
+		fmt.Print("Invalid event")
+		return 0xFFFF
+	}
+
+	payload_reg := clear_event_records_output{}
+	payload_reg.Event_Log = event
+	payload_reg.Clear_Event_Flags = 1
+	payload_reg.Number_of_Event_Record_Handles = 0 ////// clear all events
+
+	RC, _ := mb.Mailbox_cmd(0x0101, structtoByte(payload_reg))
+	if RC != 0 {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+	}
+	return RC
+}
+
 func (mb *CXLMailbox) Mailbox_cmd_get_event_interrupt_policy() *GET_EVENT_INTERRUPT_POLICY_OUTPUT {
 	RC, PL := mb.Mailbox_cmd(0x0102, nil)
 	if RC == 0 {
@@ -145,6 +181,22 @@ func (mb *CXLMailbox) Mailbox_cmd_get_event_interrupt_policy() *GET_EVENT_INTERR
 		return nil
 	}
 }
+
+func (mb *CXLMailbox) Mailbox_cmd_set_event_interrupt_policy(setting []int) uint16 {
+
+	payload_reg := SET_EVENT_INTERRUPT_POLICY_INPUT{}
+	payload_reg.Informational_Event_Log_Interrupt_Settings.Interrupt_Mode = bitfield_2b(setting[0])
+	payload_reg.Warning_Event_Log_Interrupt_Settings.Interrupt_Mode = bitfield_2b(setting[1])
+	payload_reg.Failure_Event_Log_Interrupt_Settings.Interrupt_Mode = bitfield_2b(setting[2])
+	payload_reg.Fatal_Event_Log_Interrupt_Settings.Interrupt_Mode = bitfield_2b(setting[3])
+
+	RC, _ := mb.Mailbox_cmd(0x0103, payload_reg.toByteArray())
+	if RC != 0 {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+	}
+	return RC
+}
+
 func (mb *CXLMailbox) Mailbox_cmd_get_fw_info() *GET_FW_INFO_OUTPUT {
 	RC, PL := mb.Mailbox_cmd(0x0200, nil)
 	if RC == 0 {
@@ -154,6 +206,48 @@ func (mb *CXLMailbox) Mailbox_cmd_get_fw_info() *GET_FW_INFO_OUTPUT {
 		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
 		return nil
 	}
+}
+
+func (mb *CXLMailbox) mailbox_cmd_transfer_fw(fw_path string) error {
+	fileBytes, err := os.ReadFile(fw_path)
+	if err != nil {
+		return fmt.Errorf("file read error!")
+	}
+	if len(fileBytes)%CXL_FW_PACK_SIZE != 0 {
+		return fmt.Errorf("fw file must be %d Bytes aligned!", CXL_FW_PACK_SIZE)
+	}
+
+	pack_offset := 0
+	max_fw_transfer_size := int(MAILBOX_CAPABILITIES_REGISTER_PAYLOAD_SIZE.read(mb.mailbox.MB_Capabilities)) - CXL_FW_PACK_SIZE
+	N_transfer := len(fileBytes) / max_fw_transfer_size // Line below: round up operation
+	if len(fileBytes)/max_fw_transfer_size != 0 {
+		N_transfer++
+	}
+
+	for transfer := 0; transfer < N_transfer; transfer++ {
+		transfer_size := max_fw_transfer_size
+		if len(fileBytes[pack_offset*CXL_FW_PACK_SIZE:]) < max_fw_transfer_size {
+			transfer_size = len(fileBytes[pack_offset*CXL_FW_PACK_SIZE:])
+		}
+		payload_reg := TRASFER_FW_INPUT(uint(transfer_size))
+		if N_transfer == 1 {
+			payload_reg.Action = 0 // full FW transfer
+		} else if transfer == 0 {
+			payload_reg.Action = 1 // initial FW transfer
+		} else if transfer == N_transfer-1 {
+			payload_reg.Action = 3 // end FW transfer
+		} else {
+			payload_reg.Action = 2 // continue FW transfer
+		}
+		payload_reg.Offset = uint32(pack_offset)
+		payload_reg.Slot = 0
+		pack_offset += max_fw_transfer_size / CXL_FW_PACK_SIZE
+		RC, _ := mb.Mailbox_cmd(0x0201, structtoByte(payload_reg))
+		if RC != 0 {
+			return fmt.Errorf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		}
+	}
+	return nil
 }
 
 func (mb *CXLMailbox) Mailbox_cmd_get_supported_logs() *get_supported_logs_output {
@@ -167,6 +261,23 @@ func (mb *CXLMailbox) Mailbox_cmd_get_supported_logs() *get_supported_logs_outpu
 		return nil
 	}
 }
+
+func (mb *CXLMailbox) Mailbox_cmd_get_log(log_input [16]byte, offset uint32, length uint32) *get_log_output {
+	payload_reg := GET_LOG_INPUT{}
+	payload_reg.Log_Identifier = log_input
+	payload_reg.Offset = offset
+	payload_reg.Length = length
+
+	RC, PL := mb.Mailbox_cmd(0x0401, structtoByte(payload_reg))
+	if RC == 0 {
+		LOG := parseStruct(PL, GET_LOG_OUTPUT(uint(payload_reg.Length))) // variable size
+		return &LOG
+	} else {
+		fmt.Printf("Mailbox ERROR: %Xh  %s", RC, MB_ReturnCode[RC])
+		return nil
+	}
+}
+
 func (mb *CXLMailbox) Mailbox_cmd_identify_memory_device() *IDENTIFY_MEMORY_DEVICE_OUTPUT {
 
 	RC, PL := mb.Mailbox_cmd(0x4000, nil)
@@ -400,6 +511,10 @@ type INTERRUPT_SETTINGS struct {
 	Interrupt_Message_Number bitfield_4b
 }
 
+func (i *INTERRUPT_SETTINGS) toByte() byte {
+	return uint8(i.Interrupt_Mode) | (uint8(i.Interrupt_Message_Number) << 4)
+}
+
 type GET_EVENT_INTERRUPT_POLICY_OUTPUT struct {
 	Informational_Event_Log_Interrupt_Settings INTERRUPT_SETTINGS
 	Warning_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
@@ -412,6 +527,13 @@ type SET_EVENT_INTERRUPT_POLICY_INPUT struct {
 	Warning_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
 	Failure_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
 	Fatal_Event_Log_Interrupt_Settings         INTERRUPT_SETTINGS
+}
+
+func (s *SET_EVENT_INTERRUPT_POLICY_INPUT) toByteArray() []byte {
+	return []byte{s.Informational_Event_Log_Interrupt_Settings.toByte(),
+		s.Warning_Event_Log_Interrupt_Settings.toByte(),
+		s.Failure_Event_Log_Interrupt_Settings.toByte(),
+		s.Fatal_Event_Log_Interrupt_Settings.toByte()}
 }
 
 type SLOT_FW_REVISION struct {
