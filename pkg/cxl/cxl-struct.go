@@ -94,6 +94,14 @@ type PCIE_EXT_CAP_HDR struct {
 	DVSEC_hdr2      DVSEC_HDR2
 }
 
+type PCIE_DEVICE_SERIAL_NUMBER_CAP struct {
+	PCIE_ext_cap_ID bitfield_16b
+	Cap_Ver         bitfield_4b
+	Next_Cap_ofs    bitfield_12b
+	SN_low          uint32
+	SN_high         uint32
+}
+
 type PCIE_DVSEC_FOR_CXL struct {
 	PCIE_ext_cap_hdr     PCIE_EXT_CAP_HDR
 	CXL_cap              CXL_CAP

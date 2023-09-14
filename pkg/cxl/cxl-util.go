@@ -123,11 +123,12 @@ func (a *ACPI) GetCedtSubtable(i int) *CEDT_SUBTABLE {
 }
 
 type CxlDev struct {
-	Bdf        *BDF       `json:"BDF"`
-	Vendor     string     `json:"Vendor"`
-	CXLrev     CxlRev     `json:"CXL-Rev"`
-	CXLdevtype CxlDevType `json:"CXL-Type"`
-	PCIE       []byte     `json:"-"`
+	Bdf          *BDF       `json:"BDF"`
+	Vendor       string     `json:"Vendor"`
+	SerialNumber string     `json:"SerialNumber"`
+	CXLrev       CxlRev     `json:"CXL-Rev"`
+	CXLdevtype   CxlDevType `json:"CXL-Type"`
+	PCIE         []byte     `json:"-"`
 }
 
 // initialize the structure based on BDF value
@@ -141,6 +142,7 @@ func (c *CxlDev) init(b *BDF) error {
 		c.Vendor = c.GetVendorInfo()
 		c.CXLrev = c.GetCxlRev()
 		c.CXLdevtype = c.GetCxlType()
+		c.SerialNumber = c.GetSerialNumber()
 	}
 
 	return err
@@ -253,6 +255,21 @@ func (c *CxlDev) GetCxlCap() CxlCaps {
 		IO_En:     UintToBool(Dvsecforcxl.CXL_ctrl.IO_En),
 		Mem_En:    UintToBool(Dvsecforcxl.CXL_ctrl.Mem_En),
 	}
+}
+
+func (c *CxlDev) GetSerialNumber() string {
+	if c.SerialNumber == "" {
+		next_cap := uint32(EXT_DVSEC_OFFSET)
+		for next_cap != 0 {
+			pcieCap := parseStruct(c.PCIE[next_cap:], PCIE_DEVICE_SERIAL_NUMBER_CAP{})
+			if int(pcieCap.PCIE_ext_cap_ID) == 0x3 { // Device Serial Numbe
+				c.SerialNumber = fmt.Sprintf("0x%x%x", pcieCap.SN_high, pcieCap.SN_low)
+				break
+			}
+			next_cap = uint32(pcieCap.Next_Cap_ofs)
+		}
+	}
+	return c.SerialNumber
 }
 
 // convert integer to bool
