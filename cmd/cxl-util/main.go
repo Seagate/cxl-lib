@@ -78,6 +78,10 @@ func (s *Settings) InitContext(args []string, ctx context.Context) (error, conte
 	s.PCIE = *pcie
 	s.CEDT = *cedt
 
+	if len(args) == 1 {
+		s.Help = true
+	}
+
 	return nil, newContext
 }
 
@@ -131,6 +135,10 @@ func main() {
 			fmt.Printf(prFmt, dev.GetBdfString(), vendorName, dev.GetDeviceInfo(), dev.GetCxlRev(), dev.GetCxlType())
 		}
 	}
+
+	// dev := devList["38:00.0"]
+	// result := dev.MailboxCCI.Mailbox_cmd_get_fw_info()
+	// PrintTableToStdout(result, "   ", "   ")
 
 	if settings.PCIE != "" {
 		fmt.Printf("\n\nPrint the PCIE config space of CXL devs: %s\n", settings.PCIE)
