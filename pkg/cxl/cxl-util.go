@@ -54,6 +54,7 @@ const (
 	CXL_REV_1_1    CxlRev = "CXL1.1"
 	CXL_REV_2_0    CxlRev = "CXL2.0"
 	CXL_REV_3_0    CxlRev = "CXL3.0"
+	CXL_INVALID    CxlRev = "NotCXL"
 )
 
 // Capability struct for CXL device
@@ -179,6 +180,9 @@ func (c *CxlDev) init(b *BDF) error {
 		c.updatePcieConfig()
 		c.Vendor = c.GetVendorInfo()
 		c.CXLrev = c.GetCxlRev()
+		if c.CXLrev == CXL_INVALID {
+			return fmt.Errorf("Not a CXL device")
+		}
 		c.CXLdevtype = c.GetCxlType()
 		if !c.isCxlRcd() {
 			// get info from register locator
@@ -231,6 +235,9 @@ func (c *CxlDev) isCxlDev() bool {
 		pcieHeader.Class_Code.Prog_if == 0x10 { // 0x10: Always 0x10 per spec
 		return true
 	}
+	if pcieHeader.Class_Code.Base_Class_Code == 0x12 { // 0x12: Processing Accelerator – vendor-specific interface
+		return true
+	}
 	return false
 }
 
@@ -270,7 +277,7 @@ func (c *CxlDev) parseComReg(addrBase int64) {
 			CXL_CMPREG_CACHE_ID_ROUTE_TABLE_CAP, // D
 			CXL_CMPREG_CACHE_ID_DECODER_CAP,     // E
 			CXL_CMPREG_EXT_HDM_DECODER_CAP:      // F
-			fmt.Printf("Component Reg [%d] is not supported yet", comRegCapPtr.Capability_ID)
+			klog.V(DBG_LVL_BASIC).Infof("Component Reg [%d] is not supported yet", comRegCapPtr.Capability_ID)
 		}
 	}
 	c.CmpReg = &cmpReg
@@ -292,6 +299,7 @@ func (c *CxlDev) GetDvsecList() map[cxl_dvsec_id]uint32 {
 	next_cap := uint32(EXT_DVSEC_OFFSET)
 	for next_cap != 0 {
 		pcieCapHeader := parseStruct(c.PCIE[next_cap:], PCIE_EXT_CAP_HDR{})
+		klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.GetDvsecList", "pcieCapHeader", pcieCapHeader)
 		if int(pcieCapHeader.DVSEC_hdr1.DVSEC_Vendor_ID) == CXL_Vendor_ID {
 			dvsec_id := pcieCapHeader.DVSEC_hdr2.DVSEC_ID
 			dvsecMap[cxl_dvsec_id(dvsec_id)] = next_cap
@@ -306,6 +314,8 @@ func (c *CxlDev) GetDvsec(dvsecId cxl_dvsec_id) interface{} {
 	Dvseclist := c.GetDvsecList()
 	Dvsecoffset, ok := Dvseclist[dvsecId]
 	if !ok {
+		klog.V(DBG_LVL_BASIC).Infof("error attempt to find dvsec id %d", dvsecId)
+		klog.V(DBG_LVL_BASIC).InfoS("available dvsec id:", "Dvseclist", Dvseclist)
 		klog.Error("can't find Dvseclist")
 	}
 	switch dvsecId {
@@ -336,7 +346,11 @@ func (c *CxlDev) GetDvsec(dvsecId cxl_dvsec_id) interface{} {
 // return the CXL revision
 func (c *CxlDev) GetCxlRev() CxlRev {
 	Dvseclist := c.GetDvsecList()
-	_, ok := Dvseclist[7]
+	_, ok := Dvseclist[0] // DVSEC 0 is mandatory on all CXL devices.
+	if !ok {
+		return CXL_INVALID
+	}
+	_, ok = Dvseclist[7]
 	if !ok {
 		return CXL_REV_1_1
 	} else {
@@ -475,7 +489,7 @@ func checkCxlDevClass(link string) bool {
 	fileBytes, err := os.ReadFile(path)
 	klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.checkCxlDevClass", "Link", path, "file", fileBytes)
 	if fileBytes != nil && err == nil {
-		if string(fileBytes) == "0x050210\n" {
+		if string(fileBytes) == "0x050210\n" || string(fileBytes) == "0x120000\n" {
 			return true
 		}
 	}
