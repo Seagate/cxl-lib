@@ -85,7 +85,7 @@ func dataSize(v reflect.Value) int {
 		return sum
 
 	default:
-		klog.V(DBG_LVL_INFO).InfoS("bitfield.dataSize", "Size", v.Type().Size())
+		klog.V(DBG_LVL_DEEP_DETAIL).InfoS("bitfield.dataSize", "Size", v.Type().Size())
 		return int(v.Type().Size())
 	}
 }

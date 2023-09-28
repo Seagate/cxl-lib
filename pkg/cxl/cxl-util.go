@@ -186,7 +186,14 @@ func (c *CxlDev) init(b *BDF) error {
 			regLoc := c.GetDvsec(CXL_DVSEC_REGISTER_LOCATOR).(registerLocator)
 			for _, blk := range regLoc.Register_Block {
 				bir := blk.Register_Offset_Low.Register_BIR
-				baseAddr := int64(pcieHeader.Base_Address_Registers[bir].Base_Address<<4) | int64(blk.Register_Offset_Low.Register_Block_Offset_Low) | int64(blk.Register_Offset_High.Register_Block_Offset_High)<<32
+				baseAddr := int64(pcieHeader.Base_Address_Registers[bir].Base_Address<<4) | int64(blk.Register_Offset_Low.Register_Block_Offset_Low)<<16 | int64(blk.Register_Offset_High.Register_Block_Offset_High)<<32
+				if pcieHeader.Base_Address_Registers[bir].Locatable == 2 { // 64bits address
+					baseAddr += (int64(pcieHeader.Base_Address_Registers[bir+1].Base_Address<<4) |
+						int64(pcieHeader.Base_Address_Registers[bir+1].Prefetchable<<3) |
+						int64(pcieHeader.Base_Address_Registers[bir+1].Locatable<<1) |
+						int64(pcieHeader.Base_Address_Registers[bir+1].Region_Type)) << 32
+				}
+				klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR: %s=0x%X Id=%d", "RegLoc_baseAddr", baseAddr, blk.Register_Offset_Low.Register_Block_Identifier)
 
 				if blk.Register_Offset_Low.Register_Block_Identifier == 1 { //component registers
 					c.parseComReg(baseAddr)
