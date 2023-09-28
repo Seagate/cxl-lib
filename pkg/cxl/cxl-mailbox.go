@@ -27,7 +27,7 @@ type CXLMailbox struct {
 
 func (mb *CXLMailbox) init(BaseAddr int64, bufSize int) error {
 	var err error
-	alignedBaseAddr := BaseAddr & 0xFFFFF000
+	alignedBaseAddr := BaseAddr & 0x7FFFFFFFFFFFF000
 	mb.dev_mem_file, err = os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
 	if err != nil {
 		klog.Fatal(err)

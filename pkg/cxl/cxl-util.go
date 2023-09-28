@@ -205,6 +205,7 @@ func (c *CxlDev) init(b *BDF) error {
 				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
 					reg := readMemory4k(baseAddr)
 					cxlMemDevCap := parseStruct(reg, DEVICE_CAPABILITIES_ARRAY_REGISTER{})
+					klog.V(DBG_LVL_BASIC).InfoS("CxlDev.init:", "cxlMemDevCap.Capabilities_Count", cxlMemDevCap.Capabilities_Count)
 					parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
 					c.Memdev = &parsedCxlMemDevCap
 					// c.initMailBox()
@@ -316,7 +317,7 @@ func (c *CxlDev) GetDvsec(dvsecId cxl_dvsec_id) interface{} {
 	if !ok {
 		klog.V(DBG_LVL_BASIC).Infof("error attempt to find dvsec id %d", dvsecId)
 		klog.V(DBG_LVL_BASIC).InfoS("available dvsec id:", "Dvseclist", Dvseclist)
-		klog.Error("can't find Dvseclist")
+		return nil
 	}
 	switch dvsecId {
 	case CXL_DVSEC_PCIE_DVSEC_FOR_CXL:
