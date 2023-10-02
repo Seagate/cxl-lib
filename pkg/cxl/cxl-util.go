@@ -154,14 +154,15 @@ func (a *ACPI) GetCedtSubtableSize(ofs int) int {
 }
 
 type CxlDev struct {
-	Bdf        *BDF                   `json:"BDF"`
-	Vendor     string                 `json:"Vendor"`
-	CXLrev     CxlRev                 `json:"CXL-Rev"`
-	CXLdevtype CxlDevType             `json:"CXL-Type"`
-	PCIE       []byte                 `json:"-"`
-	Memdev     *MemoryDeviceRegisters `json:"-"`
-	CmpReg     *ComponentRegistersPtr `json:"-"`
-	MailboxCCI *CXLMailbox            `json:"-"`
+	Bdf          *BDF                   `json:"BDF"`
+	Vendor       string                 `json:"Vendor"`
+	SerialNumber string                 `json:"SerialNumber"`
+	CXLrev       CxlRev                 `json:"CXL-Rev"`
+	CXLdevtype   CxlDevType             `json:"CXL-Type"`
+	PCIE         []byte                 `json:"-"`
+	Memdev       *MemoryDeviceRegisters `json:"-"`
+	CmpReg       *ComponentRegistersPtr `json:"-"`
+	MailboxCCI   *CXLMailbox            `json:"-"`
 }
 
 type ComponentRegistersPtr struct {
@@ -226,6 +227,7 @@ func (c *CxlDev) init(b *BDF) error {
 		} else {
 			klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR is not found\n")
 		}
+		c.SerialNumber = c.GetSerialNumber()
 	}
 
 	return err
@@ -382,6 +384,21 @@ func (c *CxlDev) GetCxlCap() CxlCaps {
 		IO_En:     UintToBool(Dvsecforcxl.CXL_ctrl.IO_En),
 		Mem_En:    UintToBool(Dvsecforcxl.CXL_ctrl.Mem_En),
 	}
+}
+
+func (c *CxlDev) GetSerialNumber() string {
+	if c.SerialNumber == "" {
+		next_cap := uint32(EXT_DVSEC_OFFSET)
+		for next_cap != 0 {
+			pcieCap := parseStruct(c.PCIE[next_cap:], PCIE_DEVICE_SERIAL_NUMBER_CAP{})
+			if int(pcieCap.PCIE_ext_cap_ID) == 0x3 { // Device Serial Numbe
+				c.SerialNumber = fmt.Sprintf("0x%x%x", pcieCap.SN_high, pcieCap.SN_low)
+				break
+			}
+			next_cap = uint32(pcieCap.Next_Cap_ofs)
+		}
+	}
+	return c.SerialNumber
 }
 
 // return the type info of the CXL device ( type 1/ type 2/ type 3 )
