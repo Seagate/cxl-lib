@@ -184,10 +184,11 @@ func (c *CxlDev) init(b *BDF) error {
 			return fmt.Errorf("Not a CXL device")
 		}
 		c.CXLdevtype = c.GetCxlType()
-		if !c.isCxlRcd() {
+		regLocDevsec := c.GetDvsec(CXL_DVSEC_REGISTER_LOCATOR)
+		if regLocDevsec != nil {
 			// get info from register locator
 			pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
-			regLoc := c.GetDvsec(CXL_DVSEC_REGISTER_LOCATOR).(registerLocator)
+			regLoc := regLocDevsec.(registerLocator)
 			for _, blk := range regLoc.Register_Block {
 				bir := blk.Register_Offset_Low.Register_BIR
 				baseAddr := int64(pcieHeader.Base_Address_Registers[bir].Base_Address<<4) | int64(blk.Register_Offset_Low.Register_Block_Offset_Low)<<16 | int64(blk.Register_Offset_High.Register_Block_Offset_High)<<32
@@ -205,22 +206,25 @@ func (c *CxlDev) init(b *BDF) error {
 				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
 					reg := readMemory4k(baseAddr)
 					cxlMemDevCap := parseStruct(reg, DEVICE_CAPABILITIES_ARRAY_REGISTER{})
-					klog.V(DBG_LVL_BASIC).InfoS("CxlDev.init:", "cxlMemDevCap.Capabilities_Count", cxlMemDevCap.Capabilities_Count)
-					parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
-					c.Memdev = &parsedCxlMemDevCap
-					// c.initMailBox()
-					klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: %s 0x%X", "RegLoc_baseAddr", baseAddr)
-					for _, cap := range c.Memdev.Device_Capability_Header {
-						if cap.Capability_ID == CXL_MEMDEV_PRIMARY_MAILBOX {
-							klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: Base Addr 0x%X oft 0x%X length 0x%X", baseAddr, cap.Offset, cap.Length)
-							mb := CXLMailbox{}
-							mb.init(baseAddr+int64(cap.Offset), int(cap.Length))
-							c.MailboxCCI = &mb
+					klog.V(DBG_LVL_BASIC).InfoS("CxlDev.init:", "cxlMemDevCap", cxlMemDevCap)
+					if cxlMemDevCap.Capability_ID == 0 { // 8.2.8.1: For the CXL Device Capabilities Array register, this field shall be set to 0000h.
+						parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
+						c.Memdev = &parsedCxlMemDevCap
+						// c.initMailBox()
+						klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: %s 0x%X", "RegLoc_baseAddr", baseAddr)
+						for _, cap := range c.Memdev.Device_Capability_Header {
+							if cap.Capability_ID == CXL_MEMDEV_PRIMARY_MAILBOX {
+								klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: Base Addr 0x%X oft 0x%X length 0x%X", baseAddr, cap.Offset, cap.Length)
+								mb := CXLMailbox{}
+								mb.init(baseAddr+int64(cap.Offset), int(cap.Length))
+								c.MailboxCCI = &mb
+							}
 						}
-
 					}
 				}
 			}
+		} else {
+			klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR is not found\n")
 		}
 	}
 
