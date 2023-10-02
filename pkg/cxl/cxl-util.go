@@ -240,9 +240,6 @@ func (c *CxlDev) isCxlDev() bool {
 		pcieHeader.Class_Code.Prog_if == 0x10 { // 0x10: Always 0x10 per spec
 		return true
 	}
-	if pcieHeader.Class_Code.Base_Class_Code == 0x12 { // 0x12: Processing Accelerator – vendor-specific interface
-		return true
-	}
 	return false
 }
 
@@ -494,7 +491,7 @@ func checkCxlDevClass(link string) bool {
 	fileBytes, err := os.ReadFile(path)
 	klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.checkCxlDevClass", "Link", path, "file", fileBytes)
 	if fileBytes != nil && err == nil {
-		if string(fileBytes) == "0x050210\n" || string(fileBytes) == "0x120000\n" {
+		if string(fileBytes) == "0x050210\n" {
 			return true
 		}
 	}
