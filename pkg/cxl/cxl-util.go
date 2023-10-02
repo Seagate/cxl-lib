@@ -392,7 +392,7 @@ func (c *CxlDev) GetSerialNumber() string {
 		for next_cap != 0 {
 			pcieCap := parseStruct(c.PCIE[next_cap:], PCIE_DEVICE_SERIAL_NUMBER_CAP{})
 			if int(pcieCap.PCIE_ext_cap_ID) == 0x3 { // Device Serial Numbe
-				c.SerialNumber = fmt.Sprintf("0x%x%x", pcieCap.SN_high, pcieCap.SN_low)
+				c.SerialNumber = fmt.Sprintf("0x%08x%08x", pcieCap.SN_high, pcieCap.SN_low)
 				break
 			}
 			next_cap = uint32(pcieCap.Next_Cap_ofs)
