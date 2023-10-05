@@ -136,10 +136,6 @@ func main() {
 		}
 	}
 
-	// dev := devList["38:00.0"]
-	// result := dev.MailboxCCI.Mailbox_cmd_get_fw_info()
-	// PrintTableToStdout(result, "   ", "   ")
-
 	if settings.PCIE != "" {
 		fmt.Printf("\n\nPrint the PCIE config space of CXL devs: %s\n", settings.PCIE)
 		bdfStringList := strings.Split(settings.PCIE, ":")
