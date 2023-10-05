@@ -154,15 +154,11 @@ func (a *ACPI) GetCedtSubtableSize(ofs int) int {
 }
 
 type CxlDev struct {
-	Bdf          *BDF                   `json:"BDF"`
-	Vendor       string                 `json:"Vendor"`
-	SerialNumber string                 `json:"SerialNumber"`
-	CXLrev       CxlRev                 `json:"CXL-Rev"`
-	CXLdevtype   CxlDevType             `json:"CXL-Type"`
-	PCIE         []byte                 `json:"-"`
-	Memdev       *MemoryDeviceRegisters `json:"-"`
-	CmpReg       *ComponentRegistersPtr `json:"-"`
-	MailboxCCI   *CXLMailbox            `json:"-"`
+	Bdf        *BDF                   `json:"BDF"`
+	PCIE       []byte                 `json:"-"`
+	Memdev     *MemoryDeviceRegisters `json:"-"`
+	CmpReg     *ComponentRegistersPtr `json:"-"`
+	MailboxCCI *CXLMailbox            `json:"-"`
 }
 
 type ComponentRegistersPtr struct {
@@ -179,12 +175,9 @@ func (c *CxlDev) init(b *BDF) error {
 	} else {
 		c.Bdf = b
 		c.updatePcieConfig()
-		c.Vendor = c.GetVendorInfo()
-		c.CXLrev = c.GetCxlRev()
-		if c.CXLrev == CXL_INVALID {
+		if c.GetCxlRev() == CXL_INVALID {
 			return fmt.Errorf("Not a CXL device")
 		}
-		c.CXLdevtype = c.GetCxlType()
 		regLocDevsec := c.GetDvsec(CXL_DVSEC_REGISTER_LOCATOR)
 		if regLocDevsec != nil {
 			// get info from register locator
@@ -227,7 +220,6 @@ func (c *CxlDev) init(b *BDF) error {
 		} else {
 			klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR is not found\n")
 		}
-		c.SerialNumber = c.GetSerialNumber()
 	}
 
 	return err
@@ -247,7 +239,7 @@ func (c *CxlDev) isCxlDev() bool {
 
 // check if a device is RCD ( CXL 1.1 device )
 func (c *CxlDev) isCxlRcd() bool {
-	return c.CXLrev == CXL_REV_1_1
+	return c.GetCxlRev() == CXL_REV_1_1
 }
 
 // parse component register from address
@@ -387,18 +379,15 @@ func (c *CxlDev) GetCxlCap() CxlCaps {
 }
 
 func (c *CxlDev) GetSerialNumber() string {
-	if c.SerialNumber == "" {
-		next_cap := uint32(EXT_DVSEC_OFFSET)
-		for next_cap != 0 {
-			pcieCap := parseStruct(c.PCIE[next_cap:], PCIE_DEVICE_SERIAL_NUMBER_CAP{})
-			if int(pcieCap.PCIE_ext_cap_ID) == 0x3 { // Device Serial Numbe
-				c.SerialNumber = fmt.Sprintf("0x%08x%08x", pcieCap.SN_high, pcieCap.SN_low)
-				break
-			}
-			next_cap = uint32(pcieCap.Next_Cap_ofs)
+	next_cap := uint32(EXT_DVSEC_OFFSET)
+	for next_cap != 0 {
+		pcieCap := parseStruct(c.PCIE[next_cap:], PCIE_DEVICE_SERIAL_NUMBER_CAP{})
+		if int(pcieCap.PCIE_ext_cap_ID) == 0x3 { // Device Serial Numbe
+			return fmt.Sprintf("0x%08x%08x", pcieCap.SN_high, pcieCap.SN_low)
 		}
+		next_cap = uint32(pcieCap.Next_Cap_ofs)
 	}
-	return c.SerialNumber
+	return ""
 }
 
 // return the type info of the CXL device ( type 1/ type 2/ type 3 )
