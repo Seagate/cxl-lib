@@ -78,6 +78,10 @@ func (s *Settings) InitContext(args []string, ctx context.Context) (error, conte
 	s.PCIE = *pcie
 	s.CEDT = *cedt
 
+	if len(args) == 1 {
+		s.Help = true
+	}
+
 	return nil, newContext
 }
 
@@ -120,15 +124,15 @@ func main() {
 
 	devList := cxl.InitCxlDevList()
 	if settings.List {
-		prFmt := "%12s | %20s | %10s | %10s | %15s \n"
+		prFmt := "%12s | %20s | %10s | %10s | %15s | %18s \n"
 		fmt.Printf("Print the list of CXL devs. Total devices found: %d\n", len(devList))
-		fmt.Printf(prFmt, "BUS:DEV.FUN", "Vendor", "Device", "Rev", "Type")
+		fmt.Printf(prFmt, "BUS:DEV.FUN", "Vendor", "Device", "Rev", "Type", "SN")
 		for _, dev := range devList {
 			vendorName := dev.GetVendorInfo()
 			if len(vendorName) > 15 {
 				vendorName = vendorName[:15] + "..."
 			}
-			fmt.Printf(prFmt, dev.GetBdfString(), vendorName, dev.GetDeviceInfo(), dev.GetCxlRev(), dev.GetCxlType())
+			fmt.Printf(prFmt, dev.GetBdfString(), vendorName, dev.GetDeviceInfo(), dev.GetCxlRev(), dev.GetCxlType(), dev.GetSerialNumber())
 		}
 	}
 
@@ -150,6 +154,35 @@ func main() {
 				fmt.Printf("\nDVSEC %s [ID:%d] at offset 0x%x:\n", id.String(), id, dvsec_ofs)
 				PrintTableToStdout(dev.GetDvsec(id), "   ", "   ")
 			}
+
+			if dev.Memdev != nil {
+				fmt.Printf("\nCXL Device Capabilities Array Register:\n")
+				PrintTableToStdout(dev.Memdev.Device_Capabilities_Array_Register, "   ", "   ")
+				for i, cap := range dev.Memdev.Device_Capability_Header {
+					fmt.Printf("\nCXL Device Capability %d Header:\n", i)
+					PrintTableToStdout(cap, "   ", "   ")
+					fmt.Printf("\nCXL Device Capability %d Content:\n", i)
+					PrintTableToStdout(dev.GetMemDevRegStruct(i), "   ", "   ")
+				}
+			}
+
+			if dev.CmpReg != nil {
+				fmt.Printf("\nCXL Component Register:\n")
+				if dev.CmpReg.Ras_Cap != nil {
+					fmt.Printf("\nRAS CAP:\n")
+					PrintTableToStdout(dev.CmpReg.Ras_Cap, "      ", "   ")
+				}
+				if dev.CmpReg.Link_Cap != nil {
+					fmt.Printf("\nLINK CAP:\n")
+					PrintTableToStdout(dev.CmpReg.Link_Cap, "      ", "   ")
+				}
+				if dev.CmpReg.HDM_Decoder_Cap != nil {
+					fmt.Printf("\nHDM DECODER CAP:\n")
+					PrintTableToStdout(dev.CmpReg.HDM_Decoder_Cap, "      ", "   ")
+				}
+
+			}
+
 		} else {
 			fmt.Printf("No CXL dev on BDF %s \n", settings.PCIE)
 
@@ -161,12 +194,17 @@ func main() {
 			fmt.Printf("No CEDT table found on the system.\n")
 		} else {
 			fmt.Printf("\nCEDT table header:\n")
-			PrintTableToStdout(cxl.ACPITables.CEDT.Header, "   ", "   ")
+			cedtHdr := cxl.ACPITables.GetCedtHeader()
+			PrintTableToStdout(cedtHdr, "   ", "   ")
 
-			for i := 0; i < cxl.ACPITables.GetCedtCount(); i++ {
-				fmt.Printf("\nCEDT subtable [%d] :\n", i)
-				PrintTableToStdout(cxl.ACPITables.GetCedtSubtable(i), "   ", "   ")
+			// iterate sub tables
+			ofs := cxl.ACPITables.CedtHeaderSize()
+			for uint32(ofs) < cedtHdr.Table_Length {
+				subT := cxl.ACPITables.GetCedtSubtable(ofs)
+				PrintTableToStdout(subT, "   ", "   ")
+				ofs += cxl.ACPITables.GetCedtSubtableSize(ofs)
 			}
+
 		}
 
 	}

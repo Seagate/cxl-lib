@@ -11,10 +11,19 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
 
 	"k8s.io/klog/v2"
 
 	_ "embed"
+)
+
+const (
+	DBG_LVL_DEFAUILT    = iota //0
+	DBG_LVL_BASIC              //1
+	DBG_LVL_INFO               //2
+	DBG_LVL_DETAIL             //3
+	DBG_LVL_DEEP_DETAIL        //4
 )
 
 //go:embed "pci.ids"
@@ -45,6 +54,7 @@ const (
 	CXL_REV_1_1    CxlRev = "CXL1.1"
 	CXL_REV_2_0    CxlRev = "CXL2.0"
 	CXL_REV_3_0    CxlRev = "CXL3.0"
+	CXL_INVALID    CxlRev = "NotCXL"
 )
 
 // Capability struct for CXL device
@@ -88,7 +98,7 @@ func initVendorTable() {
 }
 
 type ACPI struct {
-	CEDT *cedt_table_struct
+	CEDT []byte
 }
 
 // ACPI tables are static, initialize via init() func
@@ -99,35 +109,66 @@ func (a *ACPI) FetchCedt() {
 	b, err := readACPI("CEDT")
 	if err == nil {
 		acpiHdr := parseStruct(b, ACPI_HEADER{})
-		cedtFileS := parseStruct(b, CEDT_TABLE(uint(acpiHdr.getCedtSubtableCountFromAcpiHeader())))
-		a.CEDT = &cedtFileS
+		if string(acpiHdr.Signature[:]) == "CEDT" {
+			a.CEDT = b
+		}
 	} else {
-		klog.V(1).Info(err)
+		klog.V(DBG_LVL_BASIC).Info(err)
 	}
 }
 
-// Get cedt subtable counts.
-func (a *ACPI) GetCedtCount() int {
-	return len(a.CEDT.Subtable)
+// Get cedt header struct
+func (a *ACPI) GetCedtHeader() *ACPI_HEADER {
+	acpiHdr := parseStruct(a.CEDT, ACPI_HEADER{})
+	return &acpiHdr
 }
 
-// Get subtable cedt struct by index.
-func (a *ACPI) GetCedtSubtable(i int) *CEDT_SUBTABLE {
-	if a.CEDT == nil {
-		a.FetchCedt()
-	}
-	if len(a.CEDT.Subtable) > i {
-		return &a.CEDT.Subtable[i]
+// Get cedt header struct size in bytes
+func (a *ACPI) CedtHeaderSize() int {
+	return StructSize(ACPI_HEADER{})
+}
+
+// Get subtable cedt struct by offset.
+func (a *ACPI) GetCedtSubtable(ofs int) interface{} {
+	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE{})
+	switch cedt_struct_types(subT.Type) {
+	case ACPI_CEDT_CXL_HOST_BRIDGE:
+		return subT
+	case ACPI_CEDT_CXL_FIXED_MEMORY_WINDOW:
+		tempT := parseStruct(a.CEDT[ofs:], cedt_cxl_fixed_memory_window_struct{})
+		return parseStruct(a.CEDT[ofs:], CEDT_CXL_FIXED_MEMORY_WINDOW(uint(tempT.Record_Length)))
+	case ACPI_CEDT_CXL_XOR_INTERLEAVE_MATH:
+		tempT := parseStruct(a.CEDT[ofs:], cedt_cxl_xor_interleave_math_struct{})
+		return parseStruct(a.CEDT[ofs:], CEDT_CXL_XOR_INTERLEAVE_MATH(uint(tempT.Record_Length)))
+	case ACPI_CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT:
+		return parseStruct(a.CEDT[ofs:], CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT{})
 	}
 	return nil
 }
 
+// Get subtable cedt struct size in bytes.
+func (a *ACPI) GetCedtSubtableSize(ofs int) int {
+	// All sub tables shares the same header so we can use any table to get the size
+	subT := parseStruct(a.CEDT[ofs:], CEDT_CXL_HOST_BRIDGE{})
+	return int(subT.Record_Length)
+}
+
 type CxlDev struct {
-	Bdf        *BDF       `json:"BDF"`
-	Vendor     string     `json:"Vendor"`
-	CXLrev     CxlRev     `json:"CXL-Rev"`
-	CXLdevtype CxlDevType `json:"CXL-Type"`
-	PCIE       []byte     `json:"-"`
+	Bdf          *BDF                   `json:"BDF"`
+	Vendor       string                 `json:"Vendor"`
+	SerialNumber string                 `json:"SerialNumber"`
+	CXLrev       CxlRev                 `json:"CXL-Rev"`
+	CXLdevtype   CxlDevType             `json:"CXL-Type"`
+	PCIE         []byte                 `json:"-"`
+	Memdev       *MemoryDeviceRegisters `json:"-"`
+	CmpReg       *ComponentRegistersPtr `json:"-"`
+	MailboxCCI   *CXLMailbox            `json:"-"`
+}
+
+type ComponentRegistersPtr struct {
+	Ras_Cap         *CMPREG_RAS_CAP
+	Link_Cap        *CMPREG_LINK_CAP
+	HDM_Decoder_Cap *cmpreg_hdm_decoder_cap_struct
 }
 
 // initialize the structure based on BDF value
@@ -140,22 +181,110 @@ func (c *CxlDev) init(b *BDF) error {
 		c.updatePcieConfig()
 		c.Vendor = c.GetVendorInfo()
 		c.CXLrev = c.GetCxlRev()
+		if c.CXLrev == CXL_INVALID {
+			return fmt.Errorf("Not a CXL device")
+		}
 		c.CXLdevtype = c.GetCxlType()
+		regLocDevsec := c.GetDvsec(CXL_DVSEC_REGISTER_LOCATOR)
+		if regLocDevsec != nil {
+			// get info from register locator
+			pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
+			regLoc := regLocDevsec.(registerLocator)
+			for _, blk := range regLoc.Register_Block {
+				bir := blk.Register_Offset_Low.Register_BIR
+				baseAddr := int64(pcieHeader.Base_Address_Registers[bir].Base_Address<<4) | int64(blk.Register_Offset_Low.Register_Block_Offset_Low)<<16 | int64(blk.Register_Offset_High.Register_Block_Offset_High)<<32
+				if pcieHeader.Base_Address_Registers[bir].Locatable == 2 { // 64bits address
+					baseAddr += (int64(pcieHeader.Base_Address_Registers[bir+1].Base_Address<<4) |
+						int64(pcieHeader.Base_Address_Registers[bir+1].Prefetchable<<3) |
+						int64(pcieHeader.Base_Address_Registers[bir+1].Locatable<<1) |
+						int64(pcieHeader.Base_Address_Registers[bir+1].Region_Type)) << 32
+				}
+				klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR: %s=0x%X Id=%d", "RegLoc_baseAddr", baseAddr, blk.Register_Offset_Low.Register_Block_Identifier)
+
+				if blk.Register_Offset_Low.Register_Block_Identifier == 1 { //component registers
+					c.parseComReg(baseAddr)
+				}
+				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
+					reg := readMemory4k(baseAddr)
+					cxlMemDevCap := parseStruct(reg, DEVICE_CAPABILITIES_ARRAY_REGISTER{})
+					klog.V(DBG_LVL_BASIC).InfoS("CxlDev.init:", "cxlMemDevCap", cxlMemDevCap)
+					if cxlMemDevCap.Capability_ID == 0 { // 8.2.8.1: For the CXL Device Capabilities Array register, this field shall be set to 0000h.
+						parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
+						c.Memdev = &parsedCxlMemDevCap
+						// c.initMailBox()
+						klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: %s 0x%X", "RegLoc_baseAddr", baseAddr)
+						for _, cap := range c.Memdev.Device_Capability_Header {
+							if cap.Capability_ID == CXL_MEMDEV_PRIMARY_MAILBOX {
+								klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: Base Addr 0x%X oft 0x%X length 0x%X", baseAddr, cap.Offset, cap.Length)
+								mb := CXLMailbox{}
+								mb.init(baseAddr+int64(cap.Offset), int(cap.Length))
+								c.MailboxCCI = &mb
+							}
+						}
+					}
+				}
+			}
+		} else {
+			klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR is not found\n")
+		}
+		c.SerialNumber = c.GetSerialNumber()
 	}
 
 	return err
 }
 
-// check if a device is CXL device.
+// check if a device is CXL memory device.
 func (c *CxlDev) isCxlDev() bool {
 	pcieHeader := parseStruct(c.PCIE, PCIE_CONFIG_HDR{})
-	klog.V(3).InfoS("InfoS structured:   cxl-util: isCXLDev", "Vendor", hex(pcieHeader.Vendor_ID), "device", hex(pcieHeader.Device_ID), "class", hex(pcieHeader.Class_Code.Base_Class_Code), "sub", hex(pcieHeader.Class_Code.Sub_Class_Code), "prog-if", hex(pcieHeader.Class_Code.Prog_if))
+	klog.V(DBG_LVL_DETAIL).InfoS("InfoS structured:   cxl-util: isCXLDev", "Vendor", hex(pcieHeader.Vendor_ID), "device", hex(pcieHeader.Device_ID), "class", hex(pcieHeader.Class_Code.Base_Class_Code), "sub", hex(pcieHeader.Class_Code.Sub_Class_Code), "prog-if", hex(pcieHeader.Class_Code.Prog_if))
 	if pcieHeader.Class_Code.Base_Class_Code == 0x5 && // 0x05: Memory Controller
 		pcieHeader.Class_Code.Sub_Class_Code == 0x2 && // 0x02: CXL memory devic
 		pcieHeader.Class_Code.Prog_if == 0x10 { // 0x10: Always 0x10 per spec
 		return true
 	}
 	return false
+}
+
+// check if a device is RCD ( CXL 1.1 device )
+func (c *CxlDev) isCxlRcd() bool {
+	return c.CXLrev == CXL_REV_1_1
+}
+
+// parse component register from address
+func (c *CxlDev) parseComReg(addrBase int64) {
+	cmpReg := ComponentRegistersPtr{}
+	reg := readMemory4k(addrBase + 0x1000)
+	comRegCapHdr := parseStruct(reg, COMPONENT_REG_HEADER{})
+	for i := uint8(0); i < comRegCapHdr.Array_Size; i++ {
+		comRegCapPtr := parseStruct(reg[4*(i+1):], COMPONENT_CAPABILITIES_HEADER{})
+		switch cxl_cmp_cap_id(comRegCapPtr.Capability_ID) {
+		case CXL_CMPREG_RAS_CAP: //2
+			capStruct := parseStruct(reg[comRegCapPtr.Capability_Pointer:], CMPREG_RAS_CAP{})
+			cmpReg.Ras_Cap = &capStruct
+		case CXL_CMPREG_LINK_CAP: // 4
+			capStruct := parseStruct(reg[comRegCapPtr.Capability_Pointer:], CMPREG_LINK_CAP{})
+			cmpReg.Link_Cap = &capStruct
+		case CXL_CMPREG_HDM_DECODER_CAP: // 5
+			hdmDecoderCapHdr := parseStruct(reg[comRegCapPtr.Capability_Pointer:], HDM_DECODER_CAP{})
+			capStruct := parseStruct(reg[comRegCapPtr.Capability_Pointer:], CMPREG_HDM_DECODER_CAP(hdmDecoderCapHdr.getDecoderCounts()))
+			cmpReg.HDM_Decoder_Cap = &capStruct
+		case CXL_CMPREG_NULL, // 0
+			CXL_CMPREG_CAP,                      // 1
+			CXL_CMPREG_SECURE_CAP,               // 3
+			CXL_CMPREG_EXT_SECURE_CAP,           // 6
+			CXL_CMPREG_IDE_CAP,                  // 7
+			CXL_CMPREG_SNOOP_FLT_CAP,            // 8
+			CXL_CMPREG_TIMEOUT_N_ISOLATION_CAP,  // 9
+			CXL_CMPREG_CACEHMEM_EXT_CAP,         // A
+			CXL_CMPREG_BI_ROUTE_TABLE_CAP,       // B
+			CXL_CMPREG_BI_DECODER_CAP,           // C
+			CXL_CMPREG_CACHE_ID_ROUTE_TABLE_CAP, // D
+			CXL_CMPREG_CACHE_ID_DECODER_CAP,     // E
+			CXL_CMPREG_EXT_HDM_DECODER_CAP:      // F
+			klog.V(DBG_LVL_BASIC).Infof("Component Reg [%d] is not supported yet", comRegCapPtr.Capability_ID)
+		}
+	}
+	c.CmpReg = &cmpReg
 }
 
 // Update local copy of the pcie config .
@@ -168,17 +297,13 @@ func (c *CxlDev) GetBdfString() string {
 	return fmt.Sprintf("%02X:%02X.%1X", c.Bdf.Bus, c.Bdf.Device, c.Bdf.Function)
 }
 
-// return the value of the CEDT field
-func (c *CxlDev) GetCedtField(field string) interface{} {
-	return nil
-}
-
 // return a list of DVSEC tables from the CXL device
 func (c *CxlDev) GetDvsecList() map[cxl_dvsec_id]uint32 {
 	dvsecMap := make(map[cxl_dvsec_id]uint32)
 	next_cap := uint32(EXT_DVSEC_OFFSET)
 	for next_cap != 0 {
 		pcieCapHeader := parseStruct(c.PCIE[next_cap:], PCIE_EXT_CAP_HDR{})
+		klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.GetDvsecList", "pcieCapHeader", pcieCapHeader)
 		if int(pcieCapHeader.DVSEC_hdr1.DVSEC_Vendor_ID) == CXL_Vendor_ID {
 			dvsec_id := pcieCapHeader.DVSEC_hdr2.DVSEC_ID
 			dvsecMap[cxl_dvsec_id(dvsec_id)] = next_cap
@@ -193,7 +318,9 @@ func (c *CxlDev) GetDvsec(dvsecId cxl_dvsec_id) interface{} {
 	Dvseclist := c.GetDvsecList()
 	Dvsecoffset, ok := Dvseclist[dvsecId]
 	if !ok {
-		klog.Error("can't find Dvseclist")
+		klog.V(DBG_LVL_BASIC).Infof("error attempt to find dvsec id %d", dvsecId)
+		klog.V(DBG_LVL_BASIC).InfoS("available dvsec id:", "Dvseclist", Dvseclist)
+		return nil
 	}
 	switch dvsecId {
 	case CXL_DVSEC_PCIE_DVSEC_FOR_CXL:
@@ -223,7 +350,11 @@ func (c *CxlDev) GetDvsec(dvsecId cxl_dvsec_id) interface{} {
 // return the CXL revision
 func (c *CxlDev) GetCxlRev() CxlRev {
 	Dvseclist := c.GetDvsecList()
-	_, ok := Dvseclist[7]
+	_, ok := Dvseclist[0] // DVSEC 0 is mandatory on all CXL devices.
+	if !ok {
+		return CXL_INVALID
+	}
+	_, ok = Dvseclist[7]
 	if !ok {
 		return CXL_REV_1_1
 	} else {
@@ -255,13 +386,19 @@ func (c *CxlDev) GetCxlCap() CxlCaps {
 	}
 }
 
-// convert integer to bool
-func UintToBool(i bitfield_1b) bool {
-	if i == 1 {
-		return true
-	} else {
-		return false
+func (c *CxlDev) GetSerialNumber() string {
+	if c.SerialNumber == "" {
+		next_cap := uint32(EXT_DVSEC_OFFSET)
+		for next_cap != 0 {
+			pcieCap := parseStruct(c.PCIE[next_cap:], PCIE_DEVICE_SERIAL_NUMBER_CAP{})
+			if int(pcieCap.PCIE_ext_cap_ID) == 0x3 { // Device Serial Numbe
+				c.SerialNumber = fmt.Sprintf("0x%08x%08x", pcieCap.SN_high, pcieCap.SN_low)
+				break
+			}
+			next_cap = uint32(pcieCap.Next_Cap_ofs)
+		}
 	}
+	return c.SerialNumber
 }
 
 // return the type info of the CXL device ( type 1/ type 2/ type 3 )
@@ -319,6 +456,25 @@ func (c *CxlDev) GetDeviceInfo() string {
 	return fmt.Sprintf("0x%X", pcieHeader.Device_ID)
 }
 
+// parse mem dev register from index
+func (c *CxlDev) GetMemDevRegStruct(i int) any {
+	if i >= int(c.Memdev.Device_Capabilities_Array_Register.Capabilities_Count) {
+		return nil
+	}
+	hdr := c.Memdev.Device_Capability_Header[i]
+	tbl := c.Memdev.GetCapabilityByteArray(i)
+	switch hdr.Capability_ID {
+	case CXL_MEMDEV_STATUS:
+		return parseStruct(tbl, MEMDEV_DEVICE_STATUS{})
+	case CXL_MEMDEV_PRIMARY_MAILBOX:
+		return parseStruct(tbl, mailbox_registers{})
+	case CXL_MEMDEV_MEMDEV_STATUS:
+		return parseStruct(tbl, MEMDEV_MEMDEV_STATUS{})
+	default:
+		return nil
+	}
+}
+
 // obtain a list of CXL devices on the host
 func InitCxlDevList() map[string]*CxlDev {
 	CxlDevMap := make(map[string]*CxlDev)
@@ -333,12 +489,12 @@ func InitCxlDevList() map[string]*CxlDev {
 		bdf := BDF{}
 		// Convert the Linux fs format to structure
 		bdf.addrToBDF(link.Name())
-		klog.V(3).InfoS("cxl-util.InitCxlDevList", "Addr", hex(bdf.bdfToMemAddr()))
+		klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.InitCxlDevList", "Addr", hex(bdf.bdfToMemAddr()))
 		if checkCxlDevClass(link.Name()) {
 			new_CxlDev := CxlDev{}
 			err = new_CxlDev.init(&bdf)
 			if err == nil && new_CxlDev.isCxlDev() {
-				klog.V(2).InfoS("cxl-util.InitCxlDevList Device found", "Link", link.Name())
+				klog.V(DBG_LVL_INFO).InfoS("cxl-util.InitCxlDevList Device found", "Link", link.Name())
 				CxlDevMap[new_CxlDev.GetBdfString()] = &new_CxlDev
 			}
 		}
@@ -350,7 +506,7 @@ func InitCxlDevList() map[string]*CxlDev {
 func checkCxlDevClass(link string) bool {
 	path := fmt.Sprintf("/sys/bus/pci/devices/%s/class", link)
 	fileBytes, err := os.ReadFile(path)
-	klog.V(3).InfoS("cxl-util.checkCxlDevClass", "Link", path, "file", fileBytes)
+	klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.checkCxlDevClass", "Link", path, "file", fileBytes)
 	if fileBytes != nil && err == nil {
 		if string(fileBytes) == "0x050210\n" {
 			return true
@@ -365,7 +521,7 @@ func readMemory4k(baseAddress int64) []byte {
 	const bufferSize int = 4096
 
 	// Check for 4k boundary align
-	klog.V(2).InfoS("cxl-util.readMemory4k", "BaseAddress", hex(baseAddress))
+	klog.V(DBG_LVL_INFO).InfoS("cxl-util.readMemory4k", "BaseAddress", hex(baseAddress))
 	if baseAddress&int64(bufferSize-1) != 0 {
 		klog.Fatal(fmt.Errorf("BaseAddress is not 4k aligned"))
 	}
@@ -374,7 +530,7 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(3).Info("cxl-util.readMemory4k /dev/mem is opened")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k /dev/mem is opened")
 
 	defer file.Close()
 
@@ -382,18 +538,20 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(3).Info("cxl-util.readMemory4k Mmap is done")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k Mmap is done")
 
 	mmapCp := make([]byte, bufferSize)
 	// Save a copy of mmap, which will be elimicated after syscall.Munmap(mmap)
-	for i := 0; i < bufferSize; i++ {
-		mmapCp[i] = mmap[i]
+	for offset := 0; offset < bufferSize/4; offset++ {
+		// force 32bit read: some systems doesn't support 8bit read in pcie config space
+		*(*uint32)(unsafe.Pointer(&mmapCp[4*offset])) = *(*uint32)(unsafe.Pointer(&mmap[4*offset]))
 	}
+
 	err = syscall.Munmap(mmap)
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(3).Info("cxl-util.readMemory4k Munmap is done")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k Munmap is done")
 	return mmapCp
 }
 
@@ -492,4 +650,13 @@ func hexToInt(hexStr string) uint64 {
 // Wrapper function to shorten int to hex convertion call
 func hex(a any) string {
 	return fmt.Sprintf("%X", a)
+}
+
+// convert integer to bool
+func UintToBool(i bitfield_1b) bool {
+	if i == 1 {
+		return true
+	} else {
+		return false
+	}
 }

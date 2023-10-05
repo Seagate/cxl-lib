@@ -19,35 +19,77 @@ type ACPI_HEADER struct {
 	Asl_Compiler_Revision uint32
 }
 
-func (a *ACPI_HEADER) getCedtSubtableCountFromAcpiHeader() int {
-	// ACPI_HEADER is at fixed size 36B
-	// Each CEDT_SUBTABLE is at fixed size 32B
-	return (int(a.Table_Length) - 36) / 32
+type CEDT_CXL_HOST_BRIDGE struct {
+	Type          byte
+	Reserved      byte
+	Record_Length uint16
+	UID           uint32
+	CXL_Version   uint32
+	Reserved2     uint32
+	Base          uint64
+	Length        uint64
 }
 
-// // CXL Early Discovery Table (CEDT)
-type CEDT_SUBTABLE struct {
-	Subtable_Type          byte
+type cedt_cxl_fixed_memory_window_struct struct {
+	Type                   byte
 	Reserved               byte
-	Length                 uint16
-	Associated_host_bridge uint32
-	Specification_version  uint32
+	Record_Length          uint16
 	Reserved2              uint32
-	Register_base          uint64
-	Register_length        uint64
+	Base_HPA               uint64
+	Window_Size            uint64
+	ENIW                   byte // Encoded Number of Interleave Ways
+	Interleave_Arithmetic  byte
+	Reserved3              uint16
+	HBIG                   uint32 // Host Bridge Interleave Granularity
+	Window_Restrictions    uint16
+	QTG_ID                 uint16
+	Interleave_Target_List []uint32
 }
 
-type cedt_table_struct struct {
-	Header   ACPI_HEADER
-	Subtable []CEDT_SUBTABLE
-}
-
-func CEDT_TABLE(size uint) cedt_table_struct {
-	slice := make([]CEDT_SUBTABLE, size)
-	return cedt_table_struct{
-		Subtable: slice,
+func CEDT_CXL_FIXED_MEMORY_WINDOW(Record_Length uint) cedt_cxl_fixed_memory_window_struct {
+	NIW := (Record_Length - 36) / 4
+	slice := make([]uint32, NIW)
+	return cedt_cxl_fixed_memory_window_struct{
+		Interleave_Target_List: slice,
 	}
 }
+
+type cedt_cxl_xor_interleave_math_struct struct {
+	Type          byte
+	Reserved      byte
+	Record_Length uint16
+	Reserved2     uint16
+	HBIG          byte // Host Bridge Interleave Granularity
+	NIB           byte // Number of Bitmap Entries
+	XORMAP_List   []uint64
+}
+
+func CEDT_CXL_XOR_INTERLEAVE_MATH(Record_Length uint) cedt_cxl_xor_interleave_math_struct {
+	NIB := (Record_Length - 8) / 8
+	slice := make([]uint64, NIB)
+	return cedt_cxl_xor_interleave_math_struct{
+		XORMAP_List: slice,
+	}
+}
+
+type CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT struct {
+	Type                byte
+	Reserved            byte
+	Record_Length       uint16
+	RCEC_Segment_Number uint16
+	RCEC_BDF            uint16
+	Protocol_Type       byte
+	Base_Address        uint64
+}
+
+type cedt_struct_types uint
+
+const (
+	ACPI_CEDT_CXL_HOST_BRIDGE                         cedt_struct_types = iota // 0
+	ACPI_CEDT_CXL_FIXED_MEMORY_WINDOW                                          // 1
+	ACPI_CEDT_CXL_XOR_INTERLEAVE_MATH                                          // 2
+	ACPI_CEDT_RCEC_DOWNSTREAM_PORT_ASSOCIATION_STRCUT                          // 3
+)
 
 // define for PCIE config space struct
 type PCIE_CLASS_CODE struct {
@@ -92,6 +134,14 @@ type PCIE_EXT_CAP_HDR struct {
 	Next_Cap_ofs    bitfield_12b
 	DVSEC_hdr1      DVSEC_HDR1
 	DVSEC_hdr2      DVSEC_HDR2
+}
+
+type PCIE_DEVICE_SERIAL_NUMBER_CAP struct {
+	PCIE_ext_cap_ID bitfield_16b
+	Cap_Ver         bitfield_4b
+	Next_Cap_ofs    bitfield_12b
+	SN_low          uint32
+	SN_high         uint32
 }
 
 type PCIE_DVSEC_FOR_CXL struct {
@@ -422,9 +472,124 @@ func (c cxl_dvsec_id) String() string {
 	return "unknown"
 }
 
-// define for RCRB struct
+// define for memory mapped registers
+// define for CXL Component Registers
+
+type COMPONENT_REG_HEADER struct {
+	Capability_ID      uint16
+	Capability_Version bitfield_4b
+	Cache_Mem_Version  bitfield_4b
+	Array_Size         uint8
+}
+type COMPONENT_CAPABILITIES_HEADER struct {
+	Capability_ID      uint16
+	Capability_Version bitfield_4b
+	Capability_Pointer bitfield_12b
+}
+
+type CMPREG_RAS_CAP struct {
+	Uncorrectable_Error_Status_Register   uint32
+	Uncorrectable_Error_Mask_Register     uint32
+	Uncorrectable_Error_Severity_Register uint32
+	Correctable_Error_Status_Register     uint32
+	Correctable_Error_Mask_Register       uint32
+	Error_Capability_and_Control_Register uint32
+	Header_Log_Registers                  uint32
+}
+type CMPREG_LINK_CAP struct {
+	CXL_Link_Layer_Capability_Register        uint32
+	CXL_Link_Control_and_Status_Register      uint32
+	CXL_Link_Rx_Credit_Control_Register       uint32
+	CXL_Link_Rx_Credit_Return_Status_Register uint32
+	CXL_Link_Tx_Credit_Status_Register        uint32
+	CXL_Link_Ack_Timer_Control_Register       uint32
+	CXL_Link_Defeature_Register               uint32
+}
+
+type HDM_DECODER struct {
+	Base_Low      uint32
+	Base_High     uint32
+	Size_Low      uint32
+	Size_High     uint32
+	Control       uint32
+	DPA_Skip_Low  uint32
+	DPA_Skip_High uint32
+	Reserved      uint32
+}
+
+type HDM_DECODER_CAP struct {
+	Decoder_Cnt                       bitfield_4b
+	Target_Cnt                        bitfield_4b
+	A11to8_Interleave_Capable         bitfield_1b
+	A14to12_Interleave_Capable        bitfield_1b
+	Poison_On_Decode_Error_Capability bitfield_1b
+	Interleave_Capable_3_6_12_Way_    bitfield_1b
+	Interleave_Capable_16_Way         bitfield_1b
+	UIO_Capable                       bitfield_1b
+	Reserved                          bitfield_2b
+	UIO_Capable_Decoder_Count         bitfield_4b
+	MemData_NXM_Capable               bitfield_1b
+	Reserved2                         bitfield_11b
+}
+
+func (h *HDM_DECODER_CAP) getDecoderCounts() uint {
+	switch h.Decoder_Cnt {
+	case 0:
+		return 1
+	case 1, 2, 3, 4, 5, 6, 7, 8:
+		return uint(h.Decoder_Cnt) * 2
+	case 9, 10, 11, 12:
+		return uint(h.Decoder_Cnt-4) * 4
+	default:
+		return 0
+	}
+}
+
+type HDM_DECODER_GLOBAL_CONTROL struct {
+	Poison_On_Decod_Err_En bitfield_1b
+	HDMM_Decoder_En        bitfield_1b
+	Reserved               bitfield_30b
+}
+
+type cmpreg_hdm_decoder_cap_struct struct {
+	HDM_Decoder_Cap            HDM_DECODER_CAP
+	HDM_Decoder_Global_Control HDM_DECODER_GLOBAL_CONTROL
+	Reserved                   uint32
+	Reserved2                  uint32
+	HDM_Decoder                []HDM_DECODER
+}
+
+func CMPREG_HDM_DECODER_CAP(Size uint) cmpreg_hdm_decoder_cap_struct {
+	slice := make([]HDM_DECODER, Size)
+	return cmpreg_hdm_decoder_cap_struct{
+		HDM_Decoder: slice,
+	}
+}
+
+// CXL_Capability_ID Assignment
+type cxl_cmp_cap_id uint16
+
+const (
+	CXL_CMPREG_NULL                     cxl_cmp_cap_id = iota // 0
+	CXL_CMPREG_CAP                                            // 1
+	CXL_CMPREG_RAS_CAP                                        // 2
+	CXL_CMPREG_SECURE_CAP                                     // 3
+	CXL_CMPREG_LINK_CAP                                       // 4
+	CXL_CMPREG_HDM_DECODER_CAP                                // 5
+	CXL_CMPREG_EXT_SECURE_CAP                                 // 6
+	CXL_CMPREG_IDE_CAP                                        // 7
+	CXL_CMPREG_SNOOP_FLT_CAP                                  // 8
+	CXL_CMPREG_TIMEOUT_N_ISOLATION_CAP                        // 9
+	CXL_CMPREG_CACEHMEM_EXT_CAP                               // A
+	CXL_CMPREG_BI_ROUTE_TABLE_CAP                             // B
+	CXL_CMPREG_BI_DECODER_CAP                                 // C
+	CXL_CMPREG_CACHE_ID_ROUTE_TABLE_CAP                       // D
+	CXL_CMPREG_CACHE_ID_DECODER_CAP                           // E
+	CXL_CMPREG_EXT_HDM_DECODER_CAP                            // F
+)
+
 // define for CXL Memory Device Registers struct
-type CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
+type DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
 	Capability_ID      uint16
 	Version            uint8
 	Reserved           uint8
@@ -432,7 +597,7 @@ type CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER struct {
 	Reserved2          [10]uint8
 }
 
-type CXL_DEVICE_CAPABILITIES_HEADER struct {
+type DEVICE_CAPABILITIES_HEADER struct {
 	Capability_ID uint16
 	Version       uint8
 	Reserved      uint8
@@ -441,230 +606,48 @@ type CXL_DEVICE_CAPABILITIES_HEADER struct {
 	Reserved2     uint32
 }
 
-type CxlMemoryDeviceRegisters struct {
-	CXL_Device_Capabilities_Array_Register CXL_DEVICE_CAPABILITIES_ARRAY_REGISTER
-	CXL_Device_Capability_Header           []CXL_DEVICE_CAPABILITIES_HEADER
+type MemoryDeviceRegisters struct {
+	Device_Capabilities_Array_Register DEVICE_CAPABILITIES_ARRAY_REGISTER
+	Device_Capability_Header           []DEVICE_CAPABILITIES_HEADER
+	Device_Capability                  []byte
 }
 
-func CXL_MEMORY_DEVICE_REGISTERS(Size uint) CxlMemoryDeviceRegisters {
-	slice := make([]CXL_DEVICE_CAPABILITIES_HEADER, Size)
-	return CxlMemoryDeviceRegisters{
-		CXL_Device_Capability_Header: slice,
+func (m *MemoryDeviceRegisters) GetCapabilityByteArray(i int) []byte {
+	if i > int(m.Device_Capabilities_Array_Register.Capabilities_Count) {
+		return []byte{}
+	}
+	oft := m.Device_Capability_Header[i].Offset - 16*(1+uint32(m.Device_Capabilities_Array_Register.Capabilities_Count)) // offset minus header size
+	length := m.Device_Capability_Header[i].Length
+	return m.Device_Capability[oft : oft+length]
+}
+
+func CXL_MEMORY_DEVICE_REGISTERS(Size uint) MemoryDeviceRegisters { // CXL Memory device register has fixed size of 4K
+	slice := make([]DEVICE_CAPABILITIES_HEADER, Size)
+	slice2 := make([]byte, 4096-16-16*Size)
+	return MemoryDeviceRegisters{
+		Device_Capability_Header: slice,
+		Device_Capability:        slice2,
 	}
 }
 
-// define for CXL Mailbox struct
-type MAILBOX_CAPABILITIES_REGISTER struct {
-	Payload_Size                                  bitfield_5b
-	MB_Doorbell_Interrupt_Capable                 bitfield_1b
-	Background_Command_Complete_Interrupt_Capable bitfield_1b
-	Interrupt_Message_Number                      bitfield_4b
-	Reserved                                      bitfield_21b
+const (
+	CXL_MEMDEV_STATUS            = 1
+	CXL_MEMDEV_PRIMARY_MAILBOX   = 2
+	CXL_MEMDEV_SECONDARY_MAILBOX = 3
+	CXL_MEMDEV_MEMDEV_STATUS     = 0x4000
+)
+
+type MEMDEV_DEVICE_STATUS struct {
+	Event_Status uint32
+	Reserved     uint32
 }
 
-type MAILBOX_CONTROL_REGISTER struct {
-	Doorbell                              bitfield_1b
-	MB_Doorbell_Interrupt                 bitfield_1b
-	Background_Command_Complete_Interrupt bitfield_1b
-	Reserved                              bitfield_29b
-}
-
-type COMMAND_REGISTER struct {
-	Command_Opcode bitfield_16b
-	Payload_Length bitfield_21b
-	Reserved       bitfield_27b
-}
-
-type MAILBOX_STATUS_REGISTER struct {
-	Background_Operation            bitfield_1b
-	Reserved                        bitfield_31b
-	Return_Code                     bitfield_16b
-	Vendor_Specific_Extended_Status bitfield_16b
-}
-
-type BACKGROUND_COMMAND_STATUS_REGISTER struct {
-	Command_Opcode                  bitfield_16b
-	Percentage_Complete             bitfield_7b
-	Reserved                        bitfield_9b
-	Return_Code                     bitfield_16b
-	Vendor_Specific_Extended_Status bitfield_16b
-}
-
-type mailbox_registers struct {
-	MB_Capabilities                    MAILBOX_CAPABILITIES_REGISTER
-	MB_Control                         MAILBOX_CONTROL_REGISTER
-	Command_Register                   COMMAND_REGISTER
-	MB_Status                          MAILBOX_STATUS_REGISTER
-	Background_Command_Status_Register BACKGROUND_COMMAND_STATUS_REGISTER
-	Commmand_Payload_Registers         []uint8
-}
-
-func MAILBOX_REGISTERS_CLASS(Length uint) mailbox_registers {
-	var Payload_Length = Length - 32
-	slice := make([]uint8, Payload_Length)
-	return mailbox_registers{
-		Commmand_Payload_Registers: slice,
-	}
-}
-
-var MB_ReturnCode = [23]string{
-	"Success ",                               //00h
-	"Background Command Started",             //01h
-	"Invalid Input",                          //02h
-	"Unsupported",                            //03h
-	"Internal Error",                         //04h
-	"Retry Required",                         //05h
-	"Busy",                                   //06h
-	"Media Disabled",                         //07h
-	"FW Transfer in Progress",                //08h
-	"FW Transfer Out of Order",               //09h
-	"FW Authentication Failed",               //0Ah
-	"Invalid Slot",                           //0Bh
-	"Activation Failed, FW Rolled Back",      //0Ch
-	"Activation Failed, Cold Reset Required", //0Dh
-	"Invalid Handle",                         //0Eh
-	"Invalid Physical Address",               //0Fh
-	"Inject Poison Limit Reached",            //10h
-	"Permanent Media Failure",                //11h
-	"Aborted",                                //12h
-	"Invalid Security State",                 //13h
-	"Incorrect Passphrase",                   //14h
-	"Unsupported Mailbox ",                   //15h
-	"Invalid Payload Length",                 //16h
-}
-
-// Mailbox Payload Struct
-type get_event_records_output struct {
-	Flags                          uint8
-	Reserved                       uint8
-	Overflow_Error_Count           uint16
-	First_Overflow_Event_Timestamp uint64
-	Last_Overflow_Event_Timestamp  uint64
-	Event_Record_Count             uint16
-	Reserved2                      [10]uint8 //0xA
-	Event_Records                  []uint64
-}
-
-func GET_EVENT_RECORDS_OUTPUT(Record_Count uint) get_event_records_output {
-	slice := make([]uint64, Record_Count)
-	return get_event_records_output{
-		Event_Records: slice,
-	}
-}
-
-type clear_event_records_output struct {
-	Event_Log                      uint8
-	Clear_Event_Flags              uint8
-	Number_of_Event_Record_Handles uint16
-	Reserved                       uint64
-	Event_Record_Handles           []uint64
-}
-
-func CLEAR_EVENT_RECORDS_INPUT(Record_Count uint) clear_event_records_output {
-	slice := make([]uint64, Record_Count)
-	return clear_event_records_output{
-		Event_Record_Handles: slice,
-	}
-}
-
-type INTERRUPT_SETTINGS struct {
-	Interrupt_Mode           bitfield_2b
-	Reserved                 bitfield_2b
-	Interrupt_Message_Number bitfield_4b
-}
-
-type GET_EVENT_INTERRUPT_POLICY_OUTPUT struct {
-	Informational_Event_Log_Interrupt_Settings INTERRUPT_SETTINGS
-	Warning_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
-	Failure_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
-	Fatal_Event_Log_Interrupt_Settings         INTERRUPT_SETTINGS
-}
-
-type SET_EVENT_INTERRUPT_POLICY_INPUT struct {
-	Informational_Event_Log_Interrupt_Settings INTERRUPT_SETTINGS
-	Warning_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
-	Failure_Event_Log_Interrupt_Settings       INTERRUPT_SETTINGS
-	Fatal_Event_Log_Interrupt_Settings         INTERRUPT_SETTINGS
-}
-
-type SLOT_FW_REVISION struct {
-	FW_Revision [16]byte
-}
-
-type GET_FW_INFO_OUTPUT struct {
-	FW_Slots_Supported         uint8
-	FW_Slot_Info               uint8
-	FW_Activation_Capabilities uint8
-	Reserved                   [13]uint8
-	Slot_FW                    [4]SLOT_FW_REVISION
-}
-
-var CXL_FW_PACK_SIZE = 128
-
-type trasfer_fw_input struct {
-	Action    uint8
-	Slot      uint8
-	Reserved  uint16
-	Offset    uint32
-	Reserved2 [120]uint8 //0x78
-	Data      []uint8
-}
-
-func TRASFER_FW_INPUT(transfer_size uint) trasfer_fw_input {
-	slice := make([]uint8, transfer_size)
-	return trasfer_fw_input{
-		Data: slice,
-	}
-}
-
-type SUPPORTED_LOG_ENTRY struct {
-	Log_Identifier [16]byte //0x10
-	Log_Size       uint32
-}
-
-type get_supported_logs_output struct {
-	Number_of_Suppoorted_Log_Entries uint16
-	Reserved                         [6]uint8
-	Supported_Log_Entries            []SUPPORTED_LOG_ENTRY
-}
-
-func GET_SUPPORTED_LOGS_OUTPUT(Entries uint) get_supported_logs_output {
-	slice := make([]SUPPORTED_LOG_ENTRY, Entries)
-	return get_supported_logs_output{
-		Supported_Log_Entries: slice,
-	}
-}
-
-type GET_LOG_INPUT struct {
-	Log_Identifier [16]byte //0x10
-	Offset         uint32
-	Length         uint32
-}
-
-type get_log_output struct {
-	Log_Data []byte
-}
-
-func GET_LOG_OUTPUT(Length uint) get_log_output {
-	slice := make([]byte, Length)
-	return get_log_output{
-		Log_Data: slice,
-	}
-}
-
-type IDENTIFY_MEMORY_DEVICE_OUTPUT struct {
-	FW_Revision                             [16]byte //0x10
-	Total_Capaciity                         uint64
-	Volatile_Only_Capacity                  uint64
-	Persistent_Only_Capacitgy               uint64
-	Partition_Aliggnment                    uint64
-	Informational_Event_Log_Size            uint16
-	Warning_Event_Log_Size                  uint16
-	Failure_Event_Log_Size                  uint16
-	Fatal_Event_Log_Size                    uint16
-	LSA_Size                                uint32
-	Poison_List_Maximum_Media_Error_Records [3]uint8
-	Inject_Poison_Limit                     uint16
-	Poison_Handling_Capabilities            uint8
-	Qos_Telemetry_Capabilities              uint8
+type MEMDEV_MEMDEV_STATUS struct {
+	Device_Fatal             bitfield_1b
+	FW_Halt                  bitfield_1b
+	Media_Status             bitfield_2b
+	Mailbox_Interfaces_Ready bitfield_1b
+	Reset_Needed             bitfield_3b
+	Reserved                 bitfield_24b
+	Reserved2                uint32
 }
