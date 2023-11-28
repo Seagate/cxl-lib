@@ -290,6 +290,95 @@ func (mb *CXLMailbox) Mailbox_cmd_identify_memory_device() *IDENTIFY_MEMORY_DEVI
 	}
 }
 
+// OPCODE translate
+func (mb *CXLMailbox) SendMailboxCCIbyOPCODE(opcode uint64, args ...interface{}) interface{} {
+	switch opcode {
+
+	//CXL device command Opcodes
+	//0x0001:"identify",
+	//0x0002:"background_operation_status",
+	//0x0003:"get_response_message_limit",
+	//0x0004:"set_response_message_limit",
+	case 0x0100:
+		return mb.Mailbox_cmd_get_event_records(args[0].(uint8))
+	case 0x0101:
+		return mb.Mailbox_cmd_clear_event_records(args[0].(uint8))
+	case 0x0102:
+		return mb.Mailbox_cmd_get_event_interrupt_policy()
+	case 0x0103:
+		return mb.Mailbox_cmd_set_event_interrupt_policy(args[0].([]int))
+	case 0x0200:
+		return mb.Mailbox_cmd_get_fw_info()
+	case 0x0201:
+		return mb.mailbox_cmd_transfer_fw(args[0].(string))
+		//0x0202:"activate_fw",
+		//0x0300:"get_timestamp",
+		//0x0301:"set_timestamp",
+	case 0x0400:
+		return mb.Mailbox_cmd_get_supported_logs()
+	case 0x0401:
+		return mb.Mailbox_cmd_get_log(args[0].([16]byte), args[1].(uint32), args[2].(uint32))
+
+		//CXL memory device command Opcodes
+	case 0x4000:
+		return mb.Mailbox_cmd_identify_memory_device()
+		//0x4100:"get_partition_info",
+		//0x4101:"set_partition_info",
+		//0x4102:"get_lsa",
+		//0x4103:"set_lsa",
+		//0x4200:"get_health_info",
+		//0x4201:"get_alert_configuration",
+		//0x4202:"set_alert_configuration",
+		//0x4203:"get_shutdown_state",
+		//0x4204:"set_shutdown_state",
+		//0x4300:"get_poison_list",
+		//0x4301:"inject_poison",
+		//0x4302:"clear_poison",
+		//0x4303:"get_scan_media_capabilities",
+		//0x4304:"scan_media",
+		//0x4305:"get_scan_media_results",
+		//0x4400:"sanitize",
+		//0x4401:"secure_erase",
+		//0x4500:"get_security_state",
+		//0x4501:"set_passphrase",
+		//0x4502:"disable_passphrase",
+		//0x4503:"unlock",
+		//0x4504:"freeze_security_state",
+		//0x4505:"passphrase_secure_erase",
+		//0x4600:"security_send",
+		//0x4601:"security_receive",
+		//0x4700:"get_sld_qos_control",
+		//0x4701:"set_sld_qos_control",
+		//0x4702:"get_sld_qos_status",
+
+		//CXL FM API Command Opcodes
+		//0x5000:"event_notification",
+		//0x5100:"identify_switch_device",
+		//0x5101:"get_physical_port_state",
+		//0x5102:"physical_port_control",
+		//0x5103:"send_ppb_cxl_io_configuration_request",
+		//0x5200:"get_cirtual_cxl_switch_info",
+		//0x5201:"bind_vppb",
+		//0x5202:"unbind_vppb",
+		//0x5203:"generate_aer_event",
+		//0x5300:"tunnel_management_coommand",
+		//0x5301:"send_ppb_cxl_io_configuration_request",
+		//0x5302:"send_ppb_cxl_io_memory_request",
+		//0x5400:"get_ld_info",
+		//0x5401:"get_ld_allocations",
+		//0x5402:"set_ld_allocations",
+		//0x5403:"get_qos_control",
+		//0x5404:"set_qos_control",
+		//0x5405:"get_qos_status",
+		//0x5406:"get_qos_allocated_bw",
+		//0x5407:"set_qos_allocated_bw",
+		//0x5408:"get_qos_bw_limit",
+		//0x5409:"set_qos_bw_limit",
+	default:
+		return nil
+	}
+
+}
 
 func print_struct_table(table any) {
 	s, _ := json.MarshalIndent(table, "   ", "   ")

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Seagate/cxl-lib/pkg/cxl"
@@ -149,6 +150,15 @@ func main() {
 
 		dev, ok := devList[settings.PCIE]
 		if ok {
+
+			if settings.mbop != "" {
+
+				opcode, _ := strconv.ParseUint(settings.mbop, 16, 64)
+				responsePayload := dev.MailboxCCI.SendMailboxCCIbyOPCODE(opcode)
+				PrintTableToStdout(responsePayload, "   ", "   ")
+
+				os.Exit(0)
+			}
 			// print the pcie header to stdout
 			fmt.Printf("\nPCIE Config Space Header:\n")
 			PrintTableToStdout(dev.GetPcieHdr(), "", "   ")
