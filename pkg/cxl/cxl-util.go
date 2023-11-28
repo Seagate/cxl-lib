@@ -160,6 +160,7 @@ type CxlDev struct {
 	Memdev     *MemoryDeviceRegisters `json:"-"`
 	CmpReg     *ComponentRegistersPtr `json:"-"`
 	MailboxCCI *CXLMailbox            `json:"-"`
+	Cdat       *DOE_CAP               `json:"-"`
 }
 
 type ComponentRegistersPtr struct {
@@ -221,6 +222,7 @@ func (c *CxlDev) init(b *BDF) error {
 		} else {
 			klog.V(DBG_LVL_BASIC).Infof("REGISTER_LOCATOR is not found\n")
 		}
+		c.CDAT_init()
 	}
 
 	return err
@@ -462,6 +464,24 @@ func (c *CxlDev) GetMemDevRegStruct(i int) any {
 		return parseStruct(tbl, MEMDEV_MEMDEV_STATUS{})
 	default:
 		return nil
+	}
+}
+
+// Initialize CDAT struct if available
+func (c *CxlDev) CDAT_init() {
+	next_cap := uint32(EXT_DVSEC_OFFSET)
+	for next_cap != 0 {
+		pcieCapHeader := parseStruct(c.PCIE[next_cap:], PCIE_EXT_CAP_HDR{})
+		klog.V(DBG_LVL_DETAIL).InfoS("cxl-util.CDAT_init", "pcieCapHeader", pcieCapHeader)
+		if int(pcieCapHeader.PCIE_ext_cap_ID) == DOE_PCIE_ext_cap_ID {
+			doe_struct := DOE_CAP{}
+			doe_struct.init(c.Bdf.bdfToMemAddr() + int64(next_cap))
+			if doe_struct.CDAT_valid {
+				c.Cdat = &doe_struct
+				return
+			}
+		}
+		next_cap = uint32(pcieCapHeader.Next_Cap_ofs)
 	}
 }
 
