@@ -8,6 +8,7 @@
 package cxl
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -389,4 +390,62 @@ func (d *decoder) value(v reflect.Value) {
 
 func (d *decoder) skip(v reflect.Value) {
 	d.offset += dataSize(v)
+}
+
+// define for CXL Mailbox struct
+func u32toByte(in []uint32) []byte {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.LittleEndian, in)
+	return buf.Bytes()
+}
+
+func bytetoU32(in []byte) []uint32 {
+	buf := bytes.NewBuffer(in)
+	out := []uint32{}
+	binary.Read(buf, binary.LittleEndian, &out)
+	return out
+}
+
+func structtoByte(s any) []byte {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.LittleEndian, s)
+	return buf.Bytes()
+}
+
+func structtoU32(s any) []uint32 {
+	return bytetoU32(structtoByte(s))
+}
+
+type u32field struct {
+	offset   int
+	bitwidth int
+}
+
+func (u *u32field) mask() uint32 {
+	return (1<<u.bitwidth - 1) << u.offset
+}
+
+func (u *u32field) read(reg uint32) uint32 {
+	return (reg >> u.offset) & (1<<u.bitwidth - 1)
+}
+
+func (u *u32field) write(reg *uint32, val uint32) {
+	*reg = (*reg &^ u.mask()) | ((val << u.offset) & u.mask())
+}
+
+type u64field struct {
+	offset   int
+	bitwidth int
+}
+
+func (u *u64field) mask() uint64 {
+	return (1<<u.bitwidth - 1) << u.offset
+}
+
+func (u *u64field) read(reg uint64) uint64 {
+	return (reg >> u.offset) & (1<<u.bitwidth - 1)
+}
+
+func (u *u64field) write(reg *uint64, val uint64) {
+	*reg = (*reg &^ u.mask()) | ((val << u.offset) & u.mask())
 }

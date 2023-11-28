@@ -6,6 +6,7 @@ package cxl
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -648,4 +649,9 @@ func UintToBool(i bitfield_1b) bool {
 	} else {
 		return false
 	}
+}
+
+func print_struct_table(table any) {
+	s, _ := json.MarshalIndent(table, "   ", "   ")
+	fmt.Print(string(s), "\n")
 }
