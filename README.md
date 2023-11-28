@@ -30,15 +30,15 @@ import (
 func main() {
 	devList := cxl.InitCxlDevList()
 
-    prFmt := "%12s | %20s | %10s | %10s | %15s \n"
+    prFmt := "%12s | %20s | %10s | %10s | %15s | %18s \n"
     fmt.Printf("Print the list of CXL devs. Total devices found: %d\n", len(devList))
-    fmt.Printf(prFmt, "BUS:DEV.FUN", "Vendor", "Device", "Rev", "Type")
+    fmt.Printf(prFmt, "BUS:DEV.FUN", "Vendor", "Device", "Rev", "Type", "SN")
     for _, dev := range devList {
         vendorName := dev.GetVendorInfo()
         if len(vendorName) > 15 {
             vendorName = vendorName[:15] + "..."
         }
-        fmt.Printf(prFmt, dev.GetBdfString(), vendorName, dev.GetDeviceInfo(), dev.GetCxlRev(), dev.GetCxlType())
+        fmt.Printf(prFmt, dev.GetBdfString(), vendorName, dev.GetDeviceInfo(), dev.GetCxlRev(), dev.GetCxlType(), dev.GetSerialNumber())
     }
 
 }

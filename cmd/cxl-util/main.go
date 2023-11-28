@@ -24,13 +24,14 @@ var helptxt = `
 cxl-util is a command line tool to discover and display CXL device information from the host server.
 
 Usage:
-./cxl-util [--version] [--help] [--list] [--PCIE=BUS:DEV.FUN] [--CEDT] [--verbosity=0]
+./cxl-util [--version] [--help] [--list] [--PCIE=BUS:DEV.FUN] [--mailbox=OpId][--CEDT] [--verbosity=0]
 
 Which:
 	version            : Print the version of this application and exit
 	help               : Print the help text and exit
 	list               : List all cxl devices on the host
 	PCIE=BUS[:DEV.FUN] : Print PCIE config space info to stdout for the CXL device at the BUS:DEV.FUN
+	mailbox=OpId       : Issue the mailbox CCI command by operation Id in hex. Need to use with --PCIE
 	CEDT               : Print CEDT info to stdout
 	verbosity          : Set the log level verbosity, where 0 is no longing and 4 is very verbose
 `
@@ -45,6 +46,7 @@ type Settings struct {
 	Help      bool   // Print the help text and exit
 	List      bool   // List all cxl devices on the host
 	PCIE      string // Print PCIE config space info to stdout
+	mbop      string // Issue the mailbox CCI command
 	CEDT      bool   // Print CEDT info to stdout
 }
 
@@ -61,6 +63,7 @@ func (s *Settings) InitContext(args []string, ctx context.Context) (error, conte
 		help      = flags.Bool("help", false, "Print the help text")
 		list      = flags.Bool("list", false, "List all CXL devices on the host")
 		pcie      = flags.String("PCIE", "", "Print the PCIE config space info for the device on the BUS value inputed")
+		mbop      = flags.String("mailbox", "", "Issue the mailbox CCI command by operation Id in hex. Need to use with --PCIE")
 		cedt      = flags.Bool("CEDT", false, "Print the ACPI CEDT table")
 	)
 
@@ -77,6 +80,7 @@ func (s *Settings) InitContext(args []string, ctx context.Context) (error, conte
 	s.List = *list
 	s.PCIE = *pcie
 	s.CEDT = *cedt
+	s.mbop = *mbop
 
 	if len(args) == 1 {
 		s.Help = true
@@ -185,7 +189,6 @@ func main() {
 
 		} else {
 			fmt.Printf("No CXL dev on BDF %s \n", settings.PCIE)
-
 		}
 	}
 
