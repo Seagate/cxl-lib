@@ -33,6 +33,7 @@ Which:
 	list               : List all cxl devices on the host
 	PCIE=BUS[:DEV.FUN] : Print PCIE config space info to stdout for the CXL device at the BUS:DEV.FUN
 	mailbox=OpId       : Issue the mailbox CCI command by operation Id in hex. Need to use with --PCIE
+	CDAT               : Print CDAT table to stdout. Need to use with --PCIE
 	CEDT               : Print CEDT info to stdout
 	verbosity          : Set the log level verbosity, where 0 is no longing and 4 is very verbose
 `
@@ -48,6 +49,7 @@ type Settings struct {
 	List      bool   // List all cxl devices on the host
 	PCIE      string // Print PCIE config space info to stdout
 	mbop      string // Issue the mailbox CCI command
+	CDAT      bool   // Print CDAT table to stdout
 	CEDT      bool   // Print CEDT info to stdout
 }
 
@@ -65,6 +67,7 @@ func (s *Settings) InitContext(args []string, ctx context.Context) (error, conte
 		list      = flags.Bool("list", false, "List all CXL devices on the host")
 		pcie      = flags.String("PCIE", "", "Print the PCIE config space info for the device on the BUS value inputed")
 		mbop      = flags.String("mailbox", "", "Issue the mailbox CCI command by operation Id in hex. Need to use with --PCIE")
+		cdat      = flags.Bool("CDAT", false, "Print CDAT table to stdout")
 		cedt      = flags.Bool("CEDT", false, "Print the ACPI CEDT table")
 	)
 
@@ -82,6 +85,7 @@ func (s *Settings) InitContext(args []string, ctx context.Context) (error, conte
 	s.PCIE = *pcie
 	s.CEDT = *cedt
 	s.mbop = *mbop
+	s.CDAT = *cdat
 
 	if len(args) == 1 {
 		s.Help = true
@@ -159,6 +163,17 @@ func main() {
 
 				os.Exit(0)
 			}
+
+			if settings.CDAT {
+
+				if dev.Cdat != nil {
+					dev.Cdat.PrintAllCDAT()
+				} else {
+					fmt.Printf("\n\nCDAT is not available on dev: %s\n", settings.PCIE)
+				}
+				os.Exit(0)
+			}
+
 			// print the pcie header to stdout
 			fmt.Printf("\nPCIE Config Space Header:\n")
 			PrintTableToStdout(dev.GetPcieHdr(), "", "   ")
