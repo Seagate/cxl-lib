@@ -226,6 +226,57 @@ func (cdat *DOE_CAP) PrintAllCDAT() {
 
 }
 
+func (cdat *DOE_CAP) Get_CDAT_DSLBIS_performance() CxlMemAttr {
+	memAttr := CxlMemAttr{}
+	if cdat.CDAT_valid {
+		cdat.doe_abort()
+
+		time.Sleep(time.Duration(MB_CHECK_INTERVAL) * time.Millisecond)
+
+		if cdat.doe_busy() {
+			fmt.Print("Device DOE is busy!\n")
+		} else {
+
+			next_entry := uint32(0)
+			for next_entry != 0xffff {
+				cdat_buf := cdat.doe_request_CDAT(next_entry)
+				//// parse CDAT
+				klog.V(DBG_LVL_DETAIL).InfoS("cxl-DOE.PrintAllCDAT", "next_entry", next_entry, "cdat_buf", cdat_buf)
+				cdat_response := parseStruct(cdat_buf, CDAT_read_Entry_Response(uint(len(cdat_buf))-4))
+				klog.V(DBG_LVL_DETAIL).InfoS("cxl-DOE.PrintAllCDAT", "cdat_response", cdat_response)
+				if next_entry != 0 { // not header
+					switch cdat_response.TableEntry[0] {
+					case CDAT_DSLBIS_Struct_Handle:
+						TableEntry := parseStruct(cdat_response.TableEntry, CDAT_DSLBIS{})
+						klog.V(DBG_LVL_DETAIL).InfoS(DSLBIS_data_string[TableEntry.Data_Type], TableEntry.Entry_Base_Unit*uint64(TableEntry.Entry[0]))
+						switch TableEntry.Data_Type {
+						case 0:
+							memAttr.AccessLatencyPs = TableEntry.Entry_Base_Unit * uint64(TableEntry.Entry[0])
+						case 1:
+							memAttr.ReadLatencyPs = TableEntry.Entry_Base_Unit * uint64(TableEntry.Entry[0])
+						case 2:
+							memAttr.WriteLatencyPs = TableEntry.Entry_Base_Unit * uint64(TableEntry.Entry[0])
+						case 3:
+							memAttr.AccessBandwidthMBs = TableEntry.Entry_Base_Unit * uint64(TableEntry.Entry[0])
+						case 4:
+							memAttr.ReadBandwidthMBs = TableEntry.Entry_Base_Unit * uint64(TableEntry.Entry[0])
+						case 5:
+							memAttr.WriteBandwidthMBs = TableEntry.Entry_Base_Unit * uint64(TableEntry.Entry[0])
+						}
+
+					default:
+						continue
+					}
+				}
+
+				next_entry = uint32(cdat_response.EntryHandle)
+			}
+		}
+
+	}
+	return memAttr
+}
+
 // ////// DOE CDAT structure
 const CXL_DOE_PROTOCOL_TABLE_ACCESS = 2
 

@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"k8s.io/klog/v2"
@@ -70,10 +72,12 @@ type CxlCaps struct {
 
 // Memory Attribute table for CXL memory perforrmance
 type CxlMemAttr struct {
-	ReadLatency    uint16
-	WriteLatency   uint16
-	ReadBandwidth  uint16
-	WriteBandwidth uint16
+	AccessLatencyPs    uint64
+	ReadLatencyPs      uint64
+	WriteLatencyPs     uint64
+	AccessBandwidthMBs uint64
+	ReadBandwidthMBs   uint64
+	WriteBandwidthMBs  uint64
 }
 
 func init() {
@@ -483,6 +487,146 @@ func (c *CxlDev) CDAT_init() {
 		}
 		next_cap = uint32(pcieCapHeader.Next_Cap_ofs)
 	}
+}
+
+type mtrrSentry struct {
+	base      uint64
+	size      uint32
+	mtrr_type uint32
+}
+
+type memRange []int64
+
+// measure latency -- the memory has to be offlined
+func (c *CxlDev) MeasureLatency() (uint64, error) {
+	var start, end time.Time
+	var diff time.Duration
+
+	startAddr := c.GetMemoryBaseAddr()
+	testSize := 128 << 20 // 128MiB should be enough for latency measurement while not taking too long
+
+	mem_file, err := os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
+	if err != nil {
+		klog.Fatal(err)
+	}
+	defer mem_file.Close()
+	klog.V(DBG_LVL_INFO).Infof("cxlDev.MeasureLatency: startAddr 0x%X testSize 0x%X", startAddr, testSize)
+	mmap, err := syscall.Mmap(int(mem_file.Fd()), startAddr, testSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	if err != nil {
+		klog.Fatal(err)
+	}
+
+	// fill the test area
+	mRange := (*memRange)(unsafe.Pointer(&mmap))
+	for i := 0; i < testSize; i += 8 {
+		(*mRange)[i>>3] = int64(i)
+	}
+
+	handlereq := mtrrSentry{
+		base:      uint64(startAddr),
+		size:      uint32(testSize),
+		mtrr_type: 0, // uncached
+	}
+	const MTRRIOC_ADD_ENTRY = 0x40104d00
+
+	mtrrfd, err := os.OpenFile("/proc/mtrr", os.O_RDWR|os.O_SYNC, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer mtrrfd.Close()
+
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(mtrrfd.Fd()), MTRRIOC_ADD_ENTRY, uintptr(unsafe.Pointer(&handlereq))); errno != 0 {
+		return 0, fmt.Errorf("MTRRIOC_ADD_ENTRY: %v", errno)
+	}
+
+	// Measure the time it takes to access each byte
+	start = time.Now()
+	for i := 0; i < testSize; i += 8 {
+		if int64(i) != (*mRange)[i>>3] {
+			klog.V(DBG_LVL_BASIC).Infof("Mismatch: Address %016X expect %016X get %016X", i, int64(i), (*mRange)[i>>3])
+		}
+	}
+	end = time.Now()
+	diff = end.Sub(start)
+
+	lat := uint64(diff.Nanoseconds() / int64(testSize>>3))
+
+	klog.V(DBG_LVL_BASIC).Infof("cxlDev.MeasureBandwidth: totalSize %d MiB, time %d ns", testSize>>20, diff.Nanoseconds())
+	fmt.Printf("Average memory latency: %d ns\n", lat)
+
+	return lat, nil
+}
+
+func (m memRange) readRegion(s, e int, ch chan int) {
+	klog.V(DBG_LVL_DETAIL).Infof("memRange.readRegion: startAddr 0x%X endAddr 0x%X", s, e)
+	klog.V(DBG_LVL_DETAIL).Infof("memRange.readRegion: m len 0x%X ", len(m))
+	for i := s; i < e; i += 8 {
+		if int64(i) != m[i>>3] {
+			klog.V(DBG_LVL_BASIC).Infof("Mismatch: Address %016X expect %016X get %016X", i, int64(i), m[i])
+		}
+	}
+	ch <- -1
+}
+
+func (m memRange) writeRegion(s, e int, ch chan int) {
+	klog.V(DBG_LVL_DETAIL).Infof("memRange.writeRegion: startAddr 0x%X endAddr 0x%X", s, e)
+	klog.V(DBG_LVL_DETAIL).Infof("memRange.writeRegion: m len 0x%X ", len(m))
+	for i := s; i < e; i += 8 {
+		m[i>>3] = int64(i)
+	}
+	ch <- -1
+}
+
+// measure bandwidth -- the whole memory has to be offlined
+func (c *CxlDev) MeasureBandwidth() (float64, error) {
+	var start, end time.Time
+	var diff time.Duration
+
+	startAddr := c.GetMemoryBaseAddr()
+	totalSize := int(c.GetMemorySize())
+
+	mem_file, err := os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
+	if err != nil {
+		return 0, fmt.Errorf("fail to open /dev/mem")
+	}
+	defer mem_file.Close()
+	klog.V(DBG_LVL_INFO).Infof("cxlDev.MeasureBandwidth: startAddr 0x%X totalSize 0x%X, threads %d", startAddr, totalSize, runtime.NumCPU())
+	mmap, err := syscall.Mmap(int(mem_file.Fd()), startAddr, totalSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	if err != nil {
+		return 0, fmt.Errorf("fail to mmap")
+	}
+
+	mRange := (*memRange)(unsafe.Pointer(&mmap))
+	numCPU := runtime.NumCPU()
+	ch := make(chan int, numCPU) // Buffering optional but sensible.
+
+	// fill the test area
+	for i := 0; i < numCPU; i++ {
+		go mRange.writeRegion(i*totalSize/numCPU, (i+1)*totalSize/numCPU, ch)
+	}
+	// Drain the channel.
+	for i := 0; i < numCPU; i++ {
+		<-ch // wait for one task to complete
+	}
+
+	// Measure the time it takes to access each byte
+	start = time.Now()
+	for i := 0; i < numCPU; i++ {
+		go mRange.readRegion(i*totalSize/numCPU, (i+1)*totalSize/numCPU, ch)
+	}
+	// Drain the channel.
+	for i := 0; i < numCPU; i++ {
+		<-ch // wait for one task to complete
+	}
+	end = time.Now()
+	diff = end.Sub(start)
+
+	bw := 1e9 * float64(totalSize>>30) / float64(diff.Nanoseconds())
+
+	klog.V(DBG_LVL_BASIC).Infof("cxlDev.MeasureBandwidth: totalSize %d GiB, time %d ns at %d threads", totalSize>>30, diff.Nanoseconds(), numCPU)
+	fmt.Printf("Average memory bandwidth: %.2f GiB/s\n", bw)
+
+	return bw, nil
 }
 
 // obtain a list of CXL devices on the host
