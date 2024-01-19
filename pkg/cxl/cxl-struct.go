@@ -621,9 +621,9 @@ func (m *MemoryDeviceRegisters) GetCapabilityByteArray(i int) []byte {
 	return m.Device_Capability[oft : oft+length]
 }
 
-func CXL_MEMORY_DEVICE_REGISTERS(Size uint) MemoryDeviceRegisters { // CXL Memory device register has fixed size of 4K
-	slice := make([]DEVICE_CAPABILITIES_HEADER, Size)
-	slice2 := make([]byte, 4096-16-16*Size)
+func CXL_MEMORY_DEVICE_REGISTERS(count uint, size uint) MemoryDeviceRegisters { // CXL Memory device register varies in header counts and total size
+	slice := make([]DEVICE_CAPABILITIES_HEADER, count)
+	slice2 := make([]byte, size-16-16*count)
 	return MemoryDeviceRegisters{
 		Device_Capability_Header: slice,
 		Device_Capability:        slice2,

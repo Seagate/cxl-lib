@@ -206,10 +206,31 @@ func (c *CxlDev) init(b *BDF) error {
 				if blk.Register_Offset_Low.Register_Block_Identifier == 3 { // cxl device registers
 					reg := readMemory4k(baseAddr)
 					cxlMemDevCap := parseStruct(reg, DEVICE_CAPABILITIES_ARRAY_REGISTER{})
-					klog.V(DBG_LVL_BASIC).InfoS("CxlDev.init:", "cxlMemDevCap", cxlMemDevCap)
+					klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init:", "cxlMemDevCap", cxlMemDevCap)
 					if cxlMemDevCap.Capability_ID == 0 { // 8.2.8.1: For the CXL Device Capabilities Array register, this field shall be set to 0000h.
-						parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count)))
-						c.Memdev = &parsedCxlMemDevCap
+						spaceNeeded := uint32(0x1000)
+						parsedCxlMemDevCap := parseStruct(reg, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count), uint(spaceNeeded)))
+
+						// check if the MemDecCap is larger than 4k
+						klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init:", "Device_Capabilities_Array_Register", parsedCxlMemDevCap.Device_Capabilities_Array_Register)
+						for i, cap := range parsedCxlMemDevCap.Device_Capability_Header {
+							klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init:", "Device_Capability_Header index", i, "cap", cap)
+							if cap.Offset+cap.Length > spaceNeeded {
+								spaceNeeded = (cap.Offset + cap.Length + 0xfff) &^ 0xfff
+							}
+						}
+						klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init: MemDev", "spaceNeeded", spaceNeeded)
+						if spaceNeeded > 0x1000 {
+							klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init: overwrite MemDev cap")
+							reg2 := readMemory(baseAddr, int(spaceNeeded))
+							klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init: reg2", "len", len(reg2))
+							parsedCxlMemDevCap2 := parseStruct(reg2, CXL_MEMORY_DEVICE_REGISTERS(uint(cxlMemDevCap.Capabilities_Count), uint(spaceNeeded)))
+							c.Memdev = &parsedCxlMemDevCap2
+						} else {
+							c.Memdev = &parsedCxlMemDevCap
+						}
+						klog.V(DBG_LVL_DETAIL).InfoS("CxlDev.init: MemDev", "c.Memdev", c.Memdev)
+
 						// c.initMailBox()
 						klog.V(DBG_LVL_BASIC).Infof("Init Mailbox: %s 0x%X", "RegLoc_baseAddr", baseAddr)
 						for _, cap := range c.Memdev.Device_Capability_Header {
@@ -672,19 +693,25 @@ func checkCxlDevClass(link string) bool {
 
 // readMemory4k: return a 4k sized byte array from the memory physical address
 func readMemory4k(baseAddress int64) []byte {
-	const bufferSize int = 4096
+	return readMemory(baseAddress, 0x1000)
+}
 
+// readMemory: return a byte array from the memory physical address
+func readMemory(baseAddress int64, bufferSize int) []byte {
 	// Check for 4k boundary align
-	klog.V(DBG_LVL_INFO).InfoS("cxl-util.readMemory4k", "BaseAddress", hex(baseAddress))
-	if baseAddress&int64(bufferSize-1) != 0 {
+	klog.V(DBG_LVL_INFO).InfoS("cxl-util.readMemory", "BaseAddress", hex(baseAddress), "size", bufferSize)
+	if (baseAddress & 0xfff) != 0 {
 		klog.Fatal(fmt.Errorf("BaseAddress is not 4k aligned"))
+	}
+	if (bufferSize & 0xfff) != 0 {
+		klog.Fatal(fmt.Errorf("bufferSize is not 4k aligned"))
 	}
 
 	file, err := os.Open("/dev/mem")
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k /dev/mem is opened")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory /dev/mem is opened")
 
 	defer file.Close()
 
@@ -692,7 +719,7 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k Mmap is done")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory Mmap is done")
 
 	mmapCp := make([]byte, bufferSize)
 	// Save a copy of mmap, which will be elimicated after syscall.Munmap(mmap)
@@ -705,7 +732,7 @@ func readMemory4k(baseAddress int64) []byte {
 	if err != nil {
 		klog.Fatal(err)
 	}
-	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory4k Munmap is done")
+	klog.V(DBG_LVL_DETAIL).Info("cxl-util.readMemory Munmap is done")
 	return mmapCp
 }
 

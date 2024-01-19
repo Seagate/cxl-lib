@@ -134,7 +134,7 @@ func BitFieldRead(r io.Reader, data any) error {
 }
 
 func ReadByBit(r io.Reader, buf []byte, m []int) {
-	rBuf := make([]byte, 4096) // Unable to decide the length of r. Support max of 4096 bytes
+	rBuf := make([]byte, 40960) // Unable to decide the length of r. Support max of 10 x 4096 bytes
 	io.ReadFull(r, rBuf)
 
 	bitOfs := 0
