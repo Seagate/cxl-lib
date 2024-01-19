@@ -212,6 +212,19 @@ func main() {
 
 			}
 
+			if dev.Cdat != nil {
+				devPerf := dev.Cdat.Get_CDAT_DSLBIS_performance()
+				fmt.Print("\nCDAT DSLBIS reported performance:")
+				fmt.Println("\nCDAT DSLBIS reported performance:", devPerf)
+			}
+			devBW, err := dev.MeasureBandwidth()
+			if err == nil {
+				fmt.Printf("\nMeasured Bandwidth: %.2f GiB/s\n", devBW)
+			}
+			devLat, err := dev.MeasureLatency()
+			if err == nil {
+				fmt.Printf("\nMeasured Latency: %d ns\n", devLat)
+			}
 		} else {
 			fmt.Printf("No CXL dev on BDF %s \n", settings.PCIE)
 		}

@@ -573,7 +573,7 @@ func (c *CxlDev) MeasureLatency() (uint64, error) {
 	lat := uint64(diff.Nanoseconds() / int64(testSize>>3))
 
 	klog.V(DBG_LVL_BASIC).Infof("cxlDev.MeasureBandwidth: totalSize %d MiB, time %d ns", testSize>>20, diff.Nanoseconds())
-	fmt.Printf("Average memory latency: %d ns\n", lat)
+	klog.V(DBG_LVL_BASIC).Infof("Average memory latency: %d ns\n", lat)
 
 	return lat, nil
 }
@@ -645,7 +645,7 @@ func (c *CxlDev) MeasureBandwidth() (float64, error) {
 	bw := 1e9 * float64(totalSize>>30) / float64(diff.Nanoseconds())
 
 	klog.V(DBG_LVL_BASIC).Infof("cxlDev.MeasureBandwidth: totalSize %d GiB, time %d ns at %d threads", totalSize>>30, diff.Nanoseconds(), numCPU)
-	fmt.Printf("Average memory bandwidth: %.2f GiB/s\n", bw)
+	klog.V(DBG_LVL_BASIC).Infof("Average memory bandwidth: %.2f GiB/s\n", bw)
 
 	return bw, nil
 }
