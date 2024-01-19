@@ -482,8 +482,8 @@ func (c *CxlDev) CDAT_init() {
 			doe_struct.init(c.Bdf.bdfToMemAddr() + int64(next_cap))
 			if doe_struct.CDAT_valid {
 				c.Cdat = &doe_struct
-				return
 			}
+			return
 		}
 		next_cap = uint32(pcieCapHeader.Next_Cap_ofs)
 	}

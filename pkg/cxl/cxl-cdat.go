@@ -113,6 +113,8 @@ func (cdat *DOE_CAP) doe_abort() {
 
 // predefined doe functions
 func (cdat *DOE_CAP) dicover_data_objects() {
+	retry := 0
+	maxRetry := 3
 	request := DOE_DATA_OBJECT(1)
 	request.DO_Hdr1.Vendor_ID = 1 //// PCI_SIG
 	request.DO_Hdr1.DO_type = 0   //// DISCOVER
@@ -138,8 +140,13 @@ func (cdat *DOE_CAP) dicover_data_objects() {
 				break
 			}
 		} else {
+			if retry > maxRetry {
+				klog.V(DBG_LVL_BASIC).InfoS("cxl-DOE.dicover_data_objects", "timeout", retry)
+				return
+			}
 			klog.V(DBG_LVL_DETAIL).InfoS("cxl-DOE.dicover_data_objects", "busy")
 			time.Sleep(time.Duration(MB_CHECK_INTERVAL) * time.Millisecond)
+			retry++
 		}
 	}
 }
