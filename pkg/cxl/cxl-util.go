@@ -528,13 +528,13 @@ func (c *CxlDev) MeasureLatency() (uint64, error) {
 
 	mem_file, err := os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
 	if err != nil {
-		klog.Fatal(err)
+		return 0, fmt.Errorf("fail to open /dev/mem: %v", err)
 	}
 	defer mem_file.Close()
 	klog.V(DBG_LVL_INFO).Infof("cxlDev.MeasureLatency: startAddr 0x%X testSize 0x%X", startAddr, testSize)
 	mmap, err := syscall.Mmap(int(mem_file.Fd()), startAddr, testSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
-		klog.Fatal(err)
+		return 0, fmt.Errorf("fail to mmap the memory: %v", err)
 	}
 
 	// fill the test area
@@ -548,7 +548,7 @@ func (c *CxlDev) MeasureLatency() (uint64, error) {
 		size:      uint32(testSize),
 		mtrr_type: 0, // uncached
 	}
-	const MTRRIOC_ADD_ENTRY = 0x40104d00
+	const MTRRIOC_ADD_ENTRY = 0x40104d00 // magic number to change MTRR
 
 	mtrrfd, err := os.OpenFile("/proc/mtrr", os.O_RDWR|os.O_SYNC, 0)
 	if err != nil {
@@ -557,7 +557,7 @@ func (c *CxlDev) MeasureLatency() (uint64, error) {
 	defer mtrrfd.Close()
 
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(mtrrfd.Fd()), MTRRIOC_ADD_ENTRY, uintptr(unsafe.Pointer(&handlereq))); errno != 0 {
-		return 0, fmt.Errorf("MTRRIOC_ADD_ENTRY: %v", errno)
+		return 0, fmt.Errorf("fail to issue system call MTRRIOC_ADD_ENTRY: %v", errno)
 	}
 
 	// Measure the time it takes to access each byte
@@ -608,13 +608,13 @@ func (c *CxlDev) MeasureBandwidth() (float64, error) {
 
 	mem_file, err := os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
 	if err != nil {
-		return 0, fmt.Errorf("fail to open /dev/mem")
+		return 0, fmt.Errorf("fail to open /dev/mem: %v", err)
 	}
 	defer mem_file.Close()
 	klog.V(DBG_LVL_INFO).Infof("cxlDev.MeasureBandwidth: startAddr 0x%X totalSize 0x%X, threads %d", startAddr, totalSize, runtime.NumCPU())
 	mmap, err := syscall.Mmap(int(mem_file.Fd()), startAddr, totalSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
-		return 0, fmt.Errorf("fail to mmap")
+		return 0, fmt.Errorf("fail to mmap the memory: %v", err)
 	}
 
 	mRange := (*memRange)(unsafe.Pointer(&mmap))
