@@ -16,7 +16,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var Version = "1.0.0"
+var Version = "1.3.2"
 
 // This variable is filled in during the linker step - -ldflags "-X main.buildTime=`date -u '+%Y-%m-%dT%H:%M:%S'`"
 var buildTime = ""
@@ -168,6 +168,11 @@ func main() {
 
 				if dev.Cdat != nil {
 					dev.Cdat.PrintAllCDAT()
+
+					devPerf := dev.Cdat.Get_CDAT_DSLBIS_performance()
+					fmt.Print("\nCDAT DSLBIS reported performance:")
+					fmt.Println("\nCDAT DSLBIS reported performance:", devPerf)
+
 				} else {
 					fmt.Printf("\n\nCDAT is not available on dev: %s\n", settings.PCIE)
 				}
@@ -212,11 +217,6 @@ func main() {
 
 			}
 
-			if dev.Cdat != nil {
-				devPerf := dev.Cdat.Get_CDAT_DSLBIS_performance()
-				fmt.Print("\nCDAT DSLBIS reported performance:")
-				fmt.Println("\nCDAT DSLBIS reported performance:", devPerf)
-			}
 			devBW, err := dev.MeasureBandwidth()
 			if err == nil {
 				fmt.Printf("\nMeasured Bandwidth: %.2f GiB/s\n", devBW)

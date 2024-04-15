@@ -524,7 +524,7 @@ func (c *CxlDev) MeasureLatency() (uint64, error) {
 	var diff time.Duration
 
 	startAddr := c.GetMemoryBaseAddr()
-	testSize := 128 << 20 // 128MiB should be enough for latency measurement while not taking too long
+	testSize := 16 << 20 // Limit to 16MiB test size
 
 	mem_file, err := os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
 	if err != nil {
@@ -572,7 +572,7 @@ func (c *CxlDev) MeasureLatency() (uint64, error) {
 
 	lat := uint64(diff.Nanoseconds() / int64(testSize>>3))
 
-	klog.V(DBG_LVL_BASIC).Infof("cxlDev.MeasureBandwidth: totalSize %d MiB, time %d ns", testSize>>20, diff.Nanoseconds())
+	klog.V(DBG_LVL_BASIC).Infof("cxlDev.MeasureLatency: totalSize %d MiB, time %d ns", testSize>>20, diff.Nanoseconds())
 	klog.V(DBG_LVL_BASIC).Infof("Average memory latency: %d ns\n", lat)
 
 	return lat, nil
@@ -603,8 +603,11 @@ func (c *CxlDev) MeasureBandwidth() (float64, error) {
 	var start, end time.Time
 	var diff time.Duration
 
-	startAddr := c.GetMemoryBaseAddr()
-	totalSize := int(c.GetMemorySize())
+	numCPU := runtime.NumCPU()
+
+	// Measure 1GiB from the middle of the memory
+	startAddr := c.GetMemoryBaseAddr() + c.GetMemorySize()/2
+	totalSize := min(int(c.GetMemorySize()), numCPU<<25) // 32MiB per core
 
 	mem_file, err := os.OpenFile("/dev/mem", os.O_RDWR|os.O_SYNC, 0)
 	if err != nil {
@@ -618,7 +621,6 @@ func (c *CxlDev) MeasureBandwidth() (float64, error) {
 	}
 
 	mRange := (*memRange)(unsafe.Pointer(&mmap))
-	numCPU := runtime.NumCPU()
 	ch := make(chan int, numCPU) // Buffering optional but sensible.
 
 	// fill the test area
