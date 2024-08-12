@@ -124,7 +124,12 @@ func (cdat *DOE_CAP) dicover_data_objects() {
 		if !cdat.doe_busy() {
 			cdat.doe_request(request)
 			for !cdat.doe_ready() {
+				if retry > maxRetry {
+					klog.V(DBG_LVL_BASIC).InfoS("cxl-DOE.dicover_data_objects", "timeout", retry)
+					return
+				}
 				time.Sleep(time.Duration(MB_CHECK_INTERVAL) * time.Millisecond)
+				retry++
 			}
 			response := cdat.doe_response()
 			discover_response := parseStruct(u32toByte([]uint32{response.Data_Object_DW[0]}), DOE_Discovery_Response{})
