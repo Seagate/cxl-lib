@@ -777,7 +777,7 @@ func getPciMmConfig() {
 	fileScanner.Split(bufio.ScanLines)
 	for fileScanner.Scan() {
 		text := fileScanner.Text()
-		if strings.Contains(text, "MMCONFIG") {
+		if strings.Contains(text, "MMCONFIG") || strings.Contains(text, "ECAM") {
 			// String Example "   80000000-8fffffff : PCI MMCONFIG 0000 [bus 00-ff]"
 			PCI_MMCONFIG_BASE_ADDR = int64(hexToInt(strings.TrimSpace(strings.Split(fileScanner.Text(), "-")[0])))
 			break
